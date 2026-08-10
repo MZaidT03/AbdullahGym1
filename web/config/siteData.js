@@ -191,8 +191,8 @@ export const siteData = {
         comment: "Super clean gym, spacious powerlifting racks, and great community. The separate shift timings for ladies and gents gives complete peace of mind for families in our city."
       },
       {
-        id: "umer",
-        name: "Umer",
+        id: "umar",
+        name: "Umar",
         role: "Member • Powerlifting & Cardio",
         rating: 5,
         initial: "U",
