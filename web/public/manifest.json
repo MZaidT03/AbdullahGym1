@@ -1,0 +1,19 @@
+{
+  "name": "Abdullah Gym 1",
+  "short_name": "Abdullah Gym 1",
+  "description": "Ladies & Gents Fitness Center — Sialkot Road near Jagna Bazar, Gujranwala",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#070D08",
+  "theme_color": "#22C55E",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/assets/icons/logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["fitness", "health", "sports"]
+}

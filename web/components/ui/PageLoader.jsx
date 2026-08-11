@@ -9,9 +9,19 @@ export function PageLoader() {
   const [fadeOut, setFadeOut] = useState(false);
 
   useEffect(() => {
+    // Only runs on client — safe to access sessionStorage here
+    if (sessionStorage.getItem("__ag1_loaded")) {
+      // Already visited this session — skip loader instantly
+      setLoading(false);
+      return;
+    }
+
     const timer = setTimeout(() => {
       setFadeOut(true);
-      setTimeout(() => setLoading(false), 500);
+      setTimeout(() => {
+        setLoading(false);
+        sessionStorage.setItem("__ag1_loaded", "1");
+      }, 500);
     }, 1000);
 
     return () => clearTimeout(timer);

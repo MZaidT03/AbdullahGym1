@@ -52,9 +52,10 @@ export function Hero({ onDownloadClick }) {
 
       {/* Hero Content Overlay */}
       <div className="relative z-10 max-w-4xl mx-auto px-4 sm:px-8 pt-32 pb-20 flex flex-col items-center">
-        {/* Main Headline */}
+        {/* Main Headline — h1 with full gym name for SEO */}
         <h1 className="text-4xl sm:text-6xl md:text-7xl lg:text-8xl font-black text-transparent bg-clip-text bg-gradient-to-r from-white via-emerald-100 to-emerald-400 tracking-tight leading-[1.05] mb-5 drop-shadow-[0_10px_10px_rgba(0,0,0,0.8)] uppercase transform hover:scale-[1.01] transition-transform duration-300">
           {siteData.hero.headline}
+          <span className="sr-only"> — Ladies &amp; Gents Fitness Center on Sialkot Road, near Jagna Bazar, Gujranwala</span>
         </h1>
 
         {/* Subtitle / Center Type */}
