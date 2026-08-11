@@ -166,7 +166,7 @@ export const metadata = {
 export default function RootLayout({ children }) {
   return (
     <html lang="en-PK" suppressHydrationWarning>
-      <body className={inter.variable}>
+      <body className={inter.variable} suppressHydrationWarning>
         <JsonLd />
         {children}
       </body>
