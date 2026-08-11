@@ -21,8 +21,8 @@ export function PageLoader() {
       setTimeout(() => {
         setLoading(false);
         sessionStorage.setItem("__ag1_loaded", "1");
-      }, 500);
-    }, 1000);
+      }, 300);
+    }, 400);
 
     return () => clearTimeout(timer);
   }, []);
