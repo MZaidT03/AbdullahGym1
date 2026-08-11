@@ -21,4 +21,18 @@ export const supabase = createClient(
   supabaseAnonKey || 'placeholder-key'
 );
 
+// Secondary client for creating new member accounts without corrupting active admin session
+export const createSecondaryAuthClient = () => {
+  return createClient(
+    supabaseUrl || 'https://placeholder.supabase.co',
+    supabaseAnonKey || 'placeholder-key',
+    {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+      },
+    }
+  );
+};
+
 export default supabase;
