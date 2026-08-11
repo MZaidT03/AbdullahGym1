@@ -10,7 +10,7 @@ export const CheckInButton = ({ isCheckedIn = false, onCheckInPress }) => {
       const result = onCheckInPress();
       if (result) {
         if (!isCheckedIn) {
-          Alert.alert('Checked In Successfully! 🎉', `Welcome to GymPro! Checked in at ${result.time || 'now'}.`);
+          Alert.alert('Checked In Successfully! 🎉', `Welcome to Abdullah Gym 1! Checked in at ${result.time || 'now'}.`);
         } else {
           Alert.alert('Checked Out', 'You have checked out of the gym. Great workout!');
         }

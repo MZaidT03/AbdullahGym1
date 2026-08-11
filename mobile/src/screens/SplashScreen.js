@@ -45,7 +45,7 @@ export const SplashScreen = ({ navigation }) => {
         <View style={styles.logoCircle}>
           <Ionicons name="barbell" size={48} color={colors.white} />
         </View>
-        <Text style={styles.title}>GymPro</Text>
+        <Text style={styles.title}>Abdullah Gym 1</Text>
         <Text style={styles.tagline}>Your fitness. Your progress.</Text>
       </Animated.View>
 

@@ -22,9 +22,11 @@ export function Hero() {
         <Button variant="primary" size="lg" className="px-8 py-3.5 rounded-xl font-bold shadow-lg shadow-emerald-500/25">
           {siteData.hero.primaryCta}
         </Button>
-        <Button variant="admin" size="lg" className="px-8 py-3.5 rounded-xl font-bold">
-          {siteData.hero.secondaryCta}
-        </Button>
+        <a href="/admin/login">
+          <Button variant="admin" size="lg" className="px-8 py-3.5 rounded-xl font-bold">
+            {siteData.hero.secondaryCta}
+          </Button>
+        </a>
       </div>
     </section>
   );

@@ -14,7 +14,7 @@ export const ProfileScreen = ({ navigation }) => {
   const handleLogout = async () => {
     Alert.alert(
       'Logout',
-      'Are you sure you want to log out of GymPro?',
+      'Are you sure you want to log out of Abdullah Gym 1?',
       [
         { text: 'Cancel', style: 'cancel' },
         {

@@ -19,8 +19,8 @@ import theme from '../constants/theme';
 export const LoginScreen = ({ navigation }) => {
   const { login } = useAuth();
 
-  const [email, setEmail] = useState('member@example.com');
-  const [password, setPassword] = useState('123456');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
@@ -57,7 +57,7 @@ export const LoginScreen = ({ navigation }) => {
             <View style={styles.logoBadge}>
               <Ionicons name="barbell" size={28} color={colors.white} />
             </View>
-            <Text style={styles.brandTitle}>GymPro</Text>
+            <Text style={styles.brandTitle}>Abdullah Gym 1</Text>
           </View>
 
           {/* Welcome Text */}
@@ -181,16 +181,15 @@ export const LoginScreen = ({ navigation }) => {
 
           {/* Quick Credential Hint */}
           <View style={styles.hintCard}>
-            <Text style={styles.hintTitle}>Demo Login Credentials:</Text>
-            <Text style={styles.hintText}>Email: member@example.com</Text>
-            <Text style={styles.hintText}>Password: 123456</Text>
+            <Text style={styles.hintTitle}>Supabase Auth Active:</Text>
+            <Text style={styles.hintText}>Enter your registered member email & password.</Text>
           </View>
 
           {/* Footer Join Option */}
           <View style={styles.footerRow}>
             <Text style={styles.footerPrompt}>Don't have an account?</Text>
             <TouchableOpacity activeOpacity={0.7}>
-              <Text style={styles.joinText}> Join GymPro</Text>
+              <Text style={styles.joinText}> Join Abdullah Gym 1</Text>
             </TouchableOpacity>
           </View>
         </ScrollView>

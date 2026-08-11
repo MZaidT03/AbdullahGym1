@@ -6,7 +6,7 @@ import theme from '../constants/theme';
 
 export const GymHeader = ({
   variant = 'home', // 'home' | 'attendance' | 'profile' | 'payments'
-  title = 'GymPro',
+  title = 'Abdullah Gym 1',
   greeting = 'Good Morning,',
   userName = 'Abdullah',
   userAvatar = 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=250',
@@ -33,7 +33,7 @@ export const GymHeader = ({
     return (
       <View style={styles.headerContainer}>
         <View style={styles.textColumn}>
-          <Text style={styles.brandTitle}>GymPro</Text>
+          <Text style={styles.brandTitle}>Abdullah Gym 1</Text>
           <Text style={styles.subtitleText}>Welcome back, {userName}</Text>
         </View>
         <TouchableOpacity
@@ -50,7 +50,7 @@ export const GymHeader = ({
   if (variant === 'profile') {
     return (
       <View style={styles.headerContainer}>
-        <Text style={styles.brandTitle}>GymPro</Text>
+        <Text style={styles.brandTitle}>Abdullah Gym 1</Text>
         <TouchableOpacity
           style={styles.iconButton}
           onPress={onEditPress}

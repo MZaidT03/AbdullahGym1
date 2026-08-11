@@ -1,6 +1,6 @@
 export const siteData = {
-  name: "GymPro",
-  title: "Abdullah Gym - Public Landing Page",
+  name: "Abdullah Gym 1",
+  title: "Abdullah Gym 1 - Public Landing Page",
   navLinks: [
     { label: "Features", href: "#features" },
     { label: "Plans", href: "#plans" },
@@ -43,5 +43,5 @@ export const siteData = {
     { label: "Terms of Service", href: "#terms" },
     { label: "Support", href: "#support" },
   ],
-  copyright: "© 2024 GymPro Management. All rights reserved."
+  copyright: "© 2026 Abdullah Gym 1. All rights reserved."
 };
