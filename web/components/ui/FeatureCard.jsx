@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useRef } from "react";
 
 function FeatureIcon({ type }) {
   switch (type) {
@@ -34,20 +34,44 @@ function FeatureIcon({ type }) {
 }
 
 export function FeatureCard({ title, description, icon }) {
+  const cardRef = useRef(null);
+
+  const handleMouseMove = (e) => {
+    if (!cardRef.current) return;
+    const rect = cardRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    cardRef.current.style.setProperty("--card-x", `${x}px`);
+    cardRef.current.style.setProperty("--card-y", `${y}px`);
+  };
+
   return (
-    <div className="bg-[#EEF4EC] border border-[#D5E0D2] rounded-2xl p-6 sm:p-7 flex flex-col items-center text-center shadow-[0_4px_16px_rgba(166,180,164,0.18)] hover:shadow-[0_8px_24px_rgba(166,180,164,0.28)] transition-all duration-300 transform hover:-translate-y-1">
+    <div
+      ref={cardRef}
+      onMouseMove={handleMouseMove}
+      className="group relative bg-[#EEF4EC] border border-[#D5E0D2] rounded-2xl p-6 sm:p-7 flex flex-col items-center text-center shadow-[0_4px_16px_rgba(166,180,164,0.18)] hover:shadow-[0_12px_28px_rgba(34,197,94,0.22)] transition-all duration-300 transform hover:-translate-y-2 overflow-hidden cursor-pointer"
+    >
+      {/* Interactive Spotlight Radial Highlight */}
+      <div
+        className="absolute inset-0 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-300"
+        style={{
+          background:
+            "radial-gradient(300px circle at var(--card-x, 50%) var(--card-y, 50%), rgba(34, 197, 94, 0.15), transparent 70%)",
+        }}
+      />
+
       {/* Icon Badge */}
-      <div className="w-14 h-14 rounded-full bg-[#E0EBDC] flex items-center justify-center mb-5 shadow-inner border border-[#D0DFC9]">
+      <div className="relative z-10 w-14 h-14 rounded-2xl bg-[#E0EBDC] flex items-center justify-center mb-5 shadow-inner border border-[#D0DFC9] group-hover:scale-110 group-hover:bg-emerald-500/20 group-hover:border-emerald-500/40 transition-all duration-300">
         <FeatureIcon type={icon} />
       </div>
 
       {/* Card Title */}
-      <h3 className="text-base sm:text-lg font-bold text-[#1A261C] mb-2 tracking-tight">
+      <h3 className="relative z-10 text-base sm:text-lg font-bold text-[#1A261C] mb-2 tracking-tight group-hover:text-[#0B6634] transition-colors duration-200">
         {title}
       </h3>
 
       {/* Description */}
-      <p className="text-xs sm:text-sm text-[#5C655E] leading-relaxed font-normal">
+      <p className="relative z-10 text-xs sm:text-sm text-[#5C655E] leading-relaxed font-normal">
         {description}
       </p>
     </div>
