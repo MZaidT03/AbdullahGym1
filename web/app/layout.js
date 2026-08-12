@@ -176,7 +176,7 @@ export default function RootLayout({ children }) {
         <link rel="apple-touch-icon" href="/assets/icons/logo.png" />
         <link rel="shortcut icon" href="/assets/icons/logo.png" />
       </head>
-      <body className={inter.variable}>
+      <body className={inter.variable} suppressHydrationWarning>
         <JsonLd />
         {children}
       </body>
