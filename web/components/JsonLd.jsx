@@ -10,13 +10,13 @@ const localBusinessSchema = {
   name: "Abdullah Gym 1",
   alternateName: [
     "Abdullah Gym 1 Gujranwala",
-    "Abdullah Gym 1 Ladies & Gents",
+    "Abdullah Gym 1 Gents & Ladies",
     "Abdullah Gym Sialkot Road",
     "Abdullah Gym Jagna Bazar",
     "Abdullah Gym Rajput Colony",
   ],
   description:
-    "Best Ladies & Gents Fitness Center in Gujranwala. Separate dedicated shifts ensure 100% privacy, certified personal trainers, weight training, cardio, bodybuilding, and custom diet & nutrition plans. Located on Sialkot Road near Jagna Bazar, Rajput Colony, Gujranwala.",
+    "Best Gents & Ladies Fitness Center in Gujranwala. Separate dedicated shifts ensure 100% privacy, certified personal trainers, weight training, cardio, bodybuilding, and custom diet & nutrition plans. Located on Sialkot Road near Jagna Bazar, Rajput Colony, Gujranwala.",
   url: SITE_URL,
   logo: `${SITE_URL}/assets/icons/logo.png`,
   image: `${SITE_URL}/assets/icons/logo.png`,
@@ -101,7 +101,7 @@ const localBusinessSchema = {
       author: { "@type": "Person", name: "Ahmed" },
       reviewRating: { "@type": "Rating", ratingValue: "5", bestRating: "5" },
       reviewBody:
-        "Super clean gym, separate shifts for ladies and gents — complete peace of mind for families. Highly recommended!",
+        "Super clean gym, separate shifts for gents and ladies — complete peace of mind for families. Highly recommended!",
     },
   ],
   offers: [
@@ -124,7 +124,7 @@ const localBusinessSchema = {
     {
       "@type": "Offer",
       name: "Personal Training Package",
-      description: "1-on-1 coaching sessions with certified master trainers Rana Irfan and Rana Ibrar.",
+      description: "1-on-1 coaching sessions with certified master trainers Rana Irfan, Rana Ibrar, and Rana Talha.",
       priceCurrency: "PKR",
       availability: "https://schema.org/InStock",
       seller: { "@id": `${SITE_URL}/#gym` },
@@ -166,6 +166,13 @@ const localBusinessSchema = {
       description: "5+ years experience in personalized fitness coaching, hypertrophy, weight loss, and custom diet plans.",
       worksFor: { "@id": `${SITE_URL}/#gym` },
     },
+    {
+      "@type": "Person",
+      name: "Rana Talha",
+      jobTitle: "Co-Founder & Fitness Coach",
+      description: "5+ years experience in personalized fitness coaching, strength conditioning, and custom diet plans.",
+      worksFor: { "@id": `${SITE_URL}/#gym` },
+    },
   ],
   hasOfferCatalog: {
     "@type": "OfferCatalog",
@@ -192,7 +199,7 @@ const faqSchema = {
       name: "What are the gym shift timings at Abdullah Gym 1 Gujranwala?",
       acceptedAnswer: {
         "@type": "Answer",
-        text: "Abdullah Gym 1 operates in dedicated gender shifts every day of the week. The Ladies Shift runs from 10:00 AM to 01:00 PM, and the Gents Shift runs from 04:00 PM to 11:00 PM — 7 days a week.",
+        text: "Abdullah Gym 1 operates in dedicated gender shifts every day of the week. The Ladies Shift runs from 10:00 AM to 01:00 PM. The Gents Shift operates in two daily slots: Morning (05:00 AM to 09:00 AM) and Evening (04:00 PM to 11:00 PM) — 7 days a week.",
       },
     },
     {
@@ -266,14 +273,7 @@ const breadcrumbSchema = {
   "@context": "https://schema.org",
   "@type": "BreadcrumbList",
   itemListElement: [
-    { "@type": "ListItem", position: 1, name: "Home — Abdullah Gym 1 Gujranwala", item: SITE_URL },
-    { "@type": "ListItem", position: 2, name: "About Us", item: `${SITE_URL}/#about` },
-    { "@type": "ListItem", position: 3, name: "Services", item: `${SITE_URL}/#services` },
-    { "@type": "ListItem", position: 4, name: "Timings & Privacy", item: `${SITE_URL}/#timings` },
-    { "@type": "ListItem", position: 5, name: "Our Trainers", item: `${SITE_URL}/#trainers` },
-    { "@type": "ListItem", position: 6, name: "Gallery", item: `${SITE_URL}/#gallery` },
-    { "@type": "ListItem", position: 7, name: "Location", item: `${SITE_URL}/#location` },
-    { "@type": "ListItem", position: 8, name: "FAQ", item: `${SITE_URL}/#faq` },
+    { "@type": "ListItem", position: 1, name: "Abdullah Gym 1", item: SITE_URL },
   ],
 };
 
@@ -281,10 +281,11 @@ const websiteSchema = {
   "@context": "https://schema.org",
   "@type": "WebSite",
   "@id": `${SITE_URL}/#website`,
-  name: "Abdullah Gym 1 — Best Gym in Gujranwala",
+  name: "Abdullah Gym 1",
+  alternateName: ["Abdullah Gym 1 Gujranwala", "Abdullah Gym"],
   url: SITE_URL,
   description:
-    "Best Ladies & Gents Fitness Center in Gujranwala — Sialkot Road near Jagna Bazar, Rajput Colony.",
+    "Best Gents & Ladies Fitness Center in Gujranwala — Sialkot Road near Jagna Bazar, Rajput Colony.",
   publisher: { "@id": `${SITE_URL}/#gym` },
   inLanguage: "en-PK",
   potentialAction: {

@@ -54,7 +54,7 @@ export function About() {
                 ABDULLAH GYM 1
               </p>
               <p className="text-sm font-semibold text-white">
-                Ladies & Gents Fitness Facility
+                Gents & Ladies Fitness Facility
               </p>
             </div>
           </div>

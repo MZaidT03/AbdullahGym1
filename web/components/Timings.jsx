@@ -64,7 +64,7 @@ export function Timings() {
           {siteData.genderSections.description}
         </p>
 
-        {/* Two Featured Shift Cards (Ladies & Gents) */}
+        {/* Two Featured Shift Cards (Gents & Ladies) */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 sm:gap-10 w-full">
           {/* Ladies Section Card */}
           <div className="group relative bg-white/5 border border-emerald-500/30 hover:border-emerald-500/60 rounded-3xl p-6 sm:p-8 backdrop-blur-md transition-all duration-300 transform hover:-translate-y-1.5 flex flex-col shadow-[0_0_40px_rgba(0,0,0,0.6)]">
@@ -124,9 +124,14 @@ export function Timings() {
               />
               <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/20" />
               
-              {/* Timing Badge on Image */}
-              <div className="absolute top-4 left-4 px-3.5 py-1.5 rounded-xl bg-white/20 border border-white/30 text-white font-black text-xs sm:text-sm uppercase tracking-wider backdrop-blur-md shadow-lg">
-                Gents Shift: {gents.timings}
+              {/* Timing Badges on Image */}
+              <div className="absolute top-3 left-3 right-3 sm:top-4 sm:left-4 sm:right-4 flex flex-wrap gap-2 z-10">
+                <div className="px-3 py-1.5 rounded-xl bg-emerald-500 text-black font-black text-xs uppercase tracking-wider shadow-lg">
+                  🌅 Morning: 05:00 AM - 09:00 AM
+                </div>
+                <div className="px-3 py-1.5 rounded-xl bg-black/80 border border-white/20 text-white font-black text-xs uppercase tracking-wider backdrop-blur-md shadow-lg">
+                  🌙 Evening: 04:00 PM - 11:00 PM
+                </div>
               </div>
 
               {/* Tag Pill */}
