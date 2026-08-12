@@ -15,16 +15,36 @@ export default function MembersPage() {
   const [newFullName, setNewFullName] = useState("");
   const [newEmail, setNewEmail] = useState("");
   const [newPhone, setNewPhone] = useState("");
-  const [newPlan, setNewPlan] = useState("Pro Membership ($50/mo)");
-  const [newFeePaid, setNewFeePaid] = useState("50.00");
+  const [newPlan, setNewPlan] = useState("Pro Membership (PKR 5,000/mo)");
+  const [newFeePaid, setNewFeePaid] = useState("5000");
   const [newPassword, setNewPassword] = useState("12345678");
+  const [availablePlans, setAvailablePlans] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState("");
   const [statusMsg, setStatusMsg] = useState("");
 
   useEffect(() => {
     fetchMembers();
+    fetchPlansFromSupabase();
   }, []);
+
+  const fetchPlansFromSupabase = async () => {
+    if (isSupabaseConfigured()) {
+      try {
+        const { data } = await supabase
+          .from("gym_plans")
+          .select("*")
+          .eq("active", true)
+          .order("created_at", { ascending: true });
+
+        if (data && data.length > 0) {
+          setAvailablePlans(data);
+        }
+      } catch (e) {
+        console.warn("Failed to fetch gym_plans from Supabase", e);
+      }
+    }
+  };
 
   const fetchMembers = async () => {
     setLoading(true);
@@ -39,7 +59,10 @@ export default function MembersPage() {
           console.error("Error fetching profiles from Supabase:", error.message);
           setStatusMsg(`Supabase Notice: ${error.message}`);
         } else if (data) {
-          setMembers(data);
+          const registeredOnly = data.filter(
+            (p) => !p.member_id?.startsWith("GP-WALK-") && !p.email?.includes("@abdullahgym.local") && p.role !== "walkin"
+          );
+          setMembers(registeredOnly);
         }
       } catch (err) {
         console.error("Supabase fetch exception:", err);
@@ -392,22 +415,45 @@ export default function MembersPage() {
                   </label>
                   <select
                     value={newPlan}
-                    onChange={(e) => setNewPlan(e.target.value)}
+                    onChange={(e) => {
+                      const selectedVal = e.target.value;
+                      setNewPlan(selectedVal);
+                      const foundPlan = availablePlans.find((p) => selectedVal.includes(p.name));
+                      if (foundPlan) {
+                        const price = foundPlan.monthly_price || foundPlan.monthlyPrice || foundPlan.daily_price || foundPlan.dailyPrice || 5000;
+                        setNewFeePaid(String(price));
+                      }
+                    }}
                     className="w-full bg-[#0A140D] border border-[#24472A] rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none focus:border-[#22C55E]"
                   >
-                    <option value="Pro Membership ($50/mo)">Pro Membership ($50/mo)</option>
-                    <option value="Pro Elite Plan ($90/mo)">Pro Elite Plan ($90/mo)</option>
-                    <option value="Standard Plan ($30/mo)">Standard Plan ($30/mo)</option>
+                    {availablePlans.length > 0 ? (
+                      availablePlans.map((p) => {
+                        const mPrice = p.monthly_price ?? p.monthlyPrice ?? 0;
+                        const dPrice = p.daily_price ?? p.dailyPrice ?? 0;
+                        const label = mPrice > 0 ? `${p.name} (PKR ${Number(mPrice).toLocaleString()}/mo)` : `${p.name} (PKR ${Number(dPrice).toLocaleString()}/day)`;
+                        return (
+                          <option key={p.id} value={label}>
+                            {label}
+                          </option>
+                        );
+                      })
+                    ) : (
+                      <>
+                        <option value="Pro Membership (PKR 5,000/mo)">Pro Membership (PKR 5,000/mo)</option>
+                        <option value="Pro Elite Plan (PKR 9,000/mo)">Pro Elite Plan (PKR 9,000/mo)</option>
+                        <option value="Standard Plan (PKR 3,500/mo)">Standard Plan (PKR 3,500/mo)</option>
+                      </>
+                    )}
                   </select>
                 </div>
 
                 <div>
                   <label className="block text-xs font-bold text-[#A1B8A6] uppercase mb-1">
-                    Fee Collected ($)
+                    Fee Collected (PKR)
                   </label>
                   <input
                     type="number"
-                    step="0.01"
+                    step="1"
                     required
                     value={newFeePaid}
                     onChange={(e) => setNewFeePaid(e.target.value)}

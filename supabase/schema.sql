@@ -40,13 +40,11 @@ CREATE POLICY "Allow all for profiles"
   USING (true)
   WITH CHECK (true);
 
--- 2. Create Attendance Table
+-- 2. Create Attendance Table (Check-Ins Only)
 CREATE TABLE IF NOT EXISTS public.attendance (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   user_id UUID NOT NULL,
   check_in_time TIMESTAMPTZ DEFAULT NOW() NOT NULL,
-  check_out_time TIMESTAMPTZ,
-  status TEXT DEFAULT 'Checked In' CHECK (status IN ('Checked In', 'Checked Out')),
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -68,9 +66,11 @@ CREATE TABLE IF NOT EXISTS public.payments (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   user_id UUID NOT NULL,
   amount NUMERIC(10, 2) NOT NULL,
-  status TEXT DEFAULT 'Paid' CHECK (status IN ('Paid', 'Pending', 'Failed')),
+  total_fee NUMERIC(10, 2) DEFAULT 5000.00,
+  status TEXT DEFAULT 'Paid' CHECK (status IN ('Paid', 'Partial', 'Unpaid', 'Pending Approval', 'Pending', 'Failed')),
   invoice_id TEXT UNIQUE,
   payment_method TEXT DEFAULT 'Credit Card',
+  proof_url TEXT,
   date TIMESTAMPTZ DEFAULT NOW(),
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -137,3 +137,73 @@ FROM auth.users u
 WHERE NOT EXISTS (
   SELECT 1 FROM public.profiles p WHERE p.id = u.id
 );
+
+-- ==========================================================
+-- 6. Create Gym Membership Plans & Pricing Table
+-- ==========================================================
+CREATE TABLE IF NOT EXISTS public.gym_plans (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  type TEXT DEFAULT 'Monthly',
+  monthly_price NUMERIC(10, 2) DEFAULT 0,
+  daily_price NUMERIC(10, 2) DEFAULT 0,
+  period TEXT DEFAULT 'per month',
+  features TEXT[] DEFAULT '{}',
+  popular BOOLEAN DEFAULT false,
+  active BOOLEAN DEFAULT true,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Enable RLS for Gym Plans
+ALTER TABLE public.gym_plans ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Allow all for gym_plans" ON public.gym_plans;
+
+CREATE POLICY "Allow all for gym_plans" 
+  ON public.gym_plans FOR ALL 
+  USING (true)
+  WITH CHECK (true);
+
+-- Insert Default Initial Plans into gym_plans (Prices in PKR)
+INSERT INTO public.gym_plans (id, name, type, monthly_price, daily_price, period, features, popular, active)
+VALUES
+  ('plan-1', 'Daily Visitor Pass', 'Daily', 0, 500.00, 'per day', ARRAY['Full Gym Equipment Access', 'Cardio Arena Access', 'Single-day Locker Access'], false, true),
+  ('plan-2', 'Standard Monthly Pass', 'Monthly', 3500.00, 400.00, 'per month', ARRAY['Full Strength & Weight Training', 'Standard Cardio Access', 'Locker Room & Shower'], false, true),
+  ('plan-3', 'Pro Membership', 'Monthly + Daily Option', 5000.00, 500.00, 'per month', ARRAY['All Standard Pass Amenities', 'Personalized Diet & Workout Chart', 'Dedicated Trainer Floor Guidance', '100% Shift Flexibility (Ladies/Gents)'], true, true),
+  ('plan-4', 'VIP Champion Pass', 'Monthly VIP', 9000.00, 800.00, 'per month', ARRAY['1-on-1 Coaching with Master Trainers', 'Custom Competition Prep & Hypertrophy', 'Unlimited Guest Access (1/week)', 'VIP Locker & Supplement Discounts'], false, true)
+ON CONFLICT (id) DO NOTHING;
+
+-- ==========================================================
+-- 7. Create General Gym Settings Table (Key-Value Pairs)
+-- ==========================================================
+CREATE TABLE IF NOT EXISTS public.gym_settings (
+  key TEXT PRIMARY KEY,
+  value JSONB NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Enable RLS for Gym Settings
+ALTER TABLE public.gym_settings ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Allow all for gym_settings" ON public.gym_settings;
+
+CREATE POLICY "Allow all for gym_settings" 
+  ON public.gym_settings FOR ALL 
+  USING (true)
+  WITH CHECK (true);
+
+-- Insert Default General Settings into gym_settings
+INSERT INTO public.gym_settings (key, value)
+VALUES
+  ('general_settings', '{
+    "gymName": "ABDULLAH GYM 1",
+    "whatsapp": "0320 8313000",
+    "email": "abdullahgym521@gmail.com",
+    "currency": "PKR",
+    "ladiesShift": "10:00 AM - 01:00 PM",
+    "gentsShift": "04:00 PM - 11:00 PM",
+    "address": "56Q5+69G, Rajput Colony Gujranwala, Pakistan"
+  }'::jsonb)
+ON CONFLICT (key) DO NOTHING;
+
