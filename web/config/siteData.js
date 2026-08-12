@@ -287,7 +287,7 @@ export const siteData = {
   socials: {
     facebook: "https://www.facebook.com/share/1BxrUQMroM/?mibextid=wwXIfr",
     tiktok: "https://www.tiktok.com/@abdullah.gym1snooker.cl0?_r=1&_t=ZS-98lDJith0bw",
-    instagram: "https://www.instagram.com/aabdullahspliment?igsh=bWFwcTNrc3lmazk5"
+    instagram: "https://www.instagram.com/aabdullahspliment"
   },
   footerLinks: [
     { label: "About Us", href: "#about" },

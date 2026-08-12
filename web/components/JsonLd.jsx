@@ -133,7 +133,7 @@ const localBusinessSchema = {
   sameAs: [
     "https://www.facebook.com/share/1BxrUQMroM/?mibextid=wwXIfr",
     "https://www.tiktok.com/@abdullah.gym1snooker.cl0?_r=1&_t=ZS-98lDJith0bw",
-    "https://www.instagram.com/aabdullahspliment?igsh=bWFwcTNrc3lmazk5",
+    "https://www.instagram.com/aabdullahspliment",
   ],
   hasMap: "https://www.google.com/maps/search/?api=1&query=Abdullah+Gym+1+%26+Snooker+Club,+56Q5%2B69G,+Rajput+Colony+Gujranwala,+Pakistan",
   amenityFeature: [
