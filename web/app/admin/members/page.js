@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { supabase, isSupabaseConfigured } from "../../../lib/supabaseClient";
+import LoadingOverlay from "../components/LoadingOverlay";
 
 export default function MembersPage() {
   const [members, setMembers] = useState([]);
@@ -16,18 +17,33 @@ export default function MembersPage() {
   const [newEmail, setNewEmail] = useState("");
   const [newPhone, setNewPhone] = useState("");
   const [newPlan, setNewPlan] = useState("Pro Membership (PKR 5,000/mo)");
+  const [baseFee, setBaseFee] = useState(5000);
   const [newFeePaid, setNewFeePaid] = useState("5000");
   const [newPassword, setNewPassword] = useState("12345678");
+
+  // Dynamic Supabase Plans & Add-Ons state
   const [availablePlans, setAvailablePlans] = useState([]);
+  const [availableAddons, setAvailableAddons] = useState([]);
+  const [selectedAddonIds, setSelectedAddonIds] = useState([]);
+
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState("");
   const [statusMsg, setStatusMsg] = useState("");
 
+  const initialDefaultAddons = [
+    { id: "addon-1", name: "Cardio Access Plan", price: 1500, icon: "🏃", description: "Unlimited cardio arena access" },
+    { id: "addon-2", name: "Personal Trainer Guidance Plan", price: 3500, icon: "🏋️", description: "1-on-1 trainer guidance" },
+    { id: "addon-3", name: "VIP Locker & Shower Access", price: 1000, icon: "🔐", description: "Single-key VIP locker storage" },
+    { id: "addon-4", name: "Sauna & Steam Bath Pass", price: 2000, icon: "♨️", description: "Post-workout steam recovery" },
+  ];
+
   useEffect(() => {
     fetchMembers();
     fetchPlansFromSupabase();
+    fetchAddonsFromSupabase();
   }, []);
 
+  // Fetch Base Plans from Supabase
   const fetchPlansFromSupabase = async () => {
     if (isSupabaseConfigured()) {
       try {
@@ -46,23 +62,85 @@ export default function MembersPage() {
     }
   };
 
+  // Fetch Add-On Services from Supabase
+  const fetchAddonsFromSupabase = async () => {
+    let loaded = false;
+    if (isSupabaseConfigured()) {
+      try {
+        // 1. Try querying dedicated Supabase table `gym_addons`
+        const { data, error } = await supabase
+          .from("gym_addons")
+          .select("*")
+          .eq("active", true)
+          .order("created_at", { ascending: true });
+
+        if (!error && data && data.length > 0) {
+          setAvailableAddons(data);
+          loaded = true;
+        } else {
+          // 2. Fallback to `gym_settings` key `gym_addons`
+          const { data: setObj } = await supabase
+            .from("gym_settings")
+            .select("value")
+            .eq("key", "gym_addons")
+            .single();
+
+          if (setObj && setObj.value && Array.isArray(setObj.value) && setObj.value.length > 0) {
+            setAvailableAddons(setObj.value.filter((a) => a.active !== false));
+            loaded = true;
+          }
+        }
+      } catch (e) {
+        console.warn("Failed to fetch gym_addons from Supabase", e);
+      }
+    }
+
+    if (!loaded) {
+      try {
+        const saved = localStorage.getItem("abdullah_gym_addons");
+        if (saved) setAvailableAddons(JSON.parse(saved).filter((a) => a.active !== false));
+        else setAvailableAddons(initialDefaultAddons);
+      } catch (e) {
+        setAvailableAddons(initialDefaultAddons);
+      }
+    }
+  };
+
   const fetchMembers = async () => {
     setLoading(true);
     if (isSupabaseConfigured()) {
       try {
-        const { data, error } = await supabase
+        const { data: profData, error } = await supabase
           .from("profiles")
           .select("*")
           .order("created_at", { ascending: false });
 
+        const { data: payData } = await supabase
+          .from("payments")
+          .select("user_id, status, amount");
+
         if (error) {
           console.error("Error fetching profiles from Supabase:", error.message);
           setStatusMsg(`Supabase Notice: ${error.message}`);
-        } else if (data) {
-          const registeredOnly = data.filter(
+        } else if (profData) {
+          const registeredOnly = profData.filter(
             (p) => !p.member_id?.startsWith("GP-WALK-") && !p.email?.includes("@abdullahgym.local") && p.role !== "walkin"
           );
-          setMembers(registeredOnly);
+
+          const evaluated = registeredOnly.map((p) => {
+            const userPays = payData ? payData.filter((pay) => pay.user_id === p.id && (pay.status === "Paid" || pay.status === "Partial")) : [];
+            const createdAt = p.created_at ? new Date(p.created_at) : null;
+            const now = new Date();
+            const daysDiff = createdAt ? (now.getTime() - createdAt.getTime()) / (1000 * 60 * 60 * 24) : 0;
+
+            if (daysDiff > 7 && userPays.length === 0) {
+              p.status = "Deactivated";
+              supabase.from("profiles").update({ status: "Deactivated" }).eq("id", p.id).then(() => {});
+            }
+            return p;
+          });
+
+          setMembers(evaluated);
         }
       } catch (err) {
         console.error("Supabase fetch exception:", err);
@@ -71,6 +149,39 @@ export default function MembersPage() {
       setStatusMsg("Supabase is not configured yet in .env.local");
     }
     setLoading(false);
+  };
+
+  // Recalculate Total Fee dynamically based on Base Plan + Selected Supabase Add-ons
+  const updateFeeCalculation = (selectedPlanStr, addonIdList) => {
+    let b = 5000;
+    const foundPlan = availablePlans.find((p) => selectedPlanStr.includes(p.name));
+    if (foundPlan) {
+      b = foundPlan.monthly_price || foundPlan.monthlyPrice || foundPlan.daily_price || foundPlan.dailyPrice || 5000;
+    } else if (selectedPlanStr.includes("3,500")) {
+      b = 3500;
+    } else if (selectedPlanStr.includes("9,000")) {
+      b = 9000;
+    }
+    setBaseFee(b);
+
+    const addonsSum = addonIdList.reduce((acc, id) => {
+      const matched = availableAddons.find((a) => a.id === id);
+      return acc + (matched ? Number(matched.price || 0) : 0);
+    }, 0);
+
+    const total = b + addonsSum;
+    setNewFeePaid(String(total));
+  };
+
+  const handleToggleAddonCheck = (addonId) => {
+    let updated = [];
+    if (selectedAddonIds.includes(addonId)) {
+      updated = selectedAddonIds.filter((id) => id !== addonId);
+    } else {
+      updated = [...selectedAddonIds, addonId];
+    }
+    setSelectedAddonIds(updated);
+    updateFeeCalculation(newPlan, updated);
   };
 
   const handleAddMember = async (e) => {
@@ -86,6 +197,14 @@ export default function MembersPage() {
     setSubmitting(true);
     const cleanEmail = newEmail.trim().toLowerCase();
 
+    // Construct final plan string with selected Supabase add-ons
+    let finalPlanLabel = newPlan;
+    const selectedAddonObjs = availableAddons.filter((a) => selectedAddonIds.includes(a.id));
+    if (selectedAddonObjs.length > 0) {
+      const addonTitles = selectedAddonObjs.map((a) => `${a.name} (+PKR ${Number(a.price).toLocaleString()})`);
+      finalPlanLabel = `${newPlan} [Add-ons: ${addonTitles.join(" + ")}]`;
+    }
+
     try {
       // Call backend API route to register user in auth.users and profiles
       const res = await fetch("/api/admin/create-member", {
@@ -95,7 +214,7 @@ export default function MembersPage() {
           email: cleanEmail,
           password: newPassword,
           full_name: newFullName,
-          plan: newPlan,
+          plan: finalPlanLabel,
           fee_paid: newFeePaid,
         }),
       });
@@ -118,13 +237,15 @@ export default function MembersPage() {
         password: newPassword,
         memberId: result.user?.member_id || "GP-8472-991",
         feePaid: newFeePaid,
+        plan: finalPlanLabel,
       });
 
       // Reset form
       setNewFullName("");
       setNewEmail("");
       setNewPhone("");
-      setNewFeePaid("50.00");
+      setSelectedAddonIds([]);
+      setNewFeePaid("5000");
       setNewPassword("12345678");
       setIsModalOpen(false);
     } catch (err) {
@@ -170,84 +291,104 @@ export default function MembersPage() {
   });
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 font-sans">
       {/* Top Header & Register Button */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight">
+          <h2 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
             Member Management
           </h2>
-          <p className="text-xs text-[#829E88]">
-            Real-time Supabase member directory, fee collections & mobile app accounts
+          <p className="text-xs text-slate-500 mt-0.5">
+            Register new members, select base plans + dynamic Supabase Add-On Services, and manage accounts.
           </p>
         </div>
 
         <button
-          onClick={() => setIsModalOpen(true)}
-          className="bg-[#22C55E] hover:bg-[#16A34A] text-black font-bold text-xs px-5 py-3 rounded-xl transition shadow-lg shadow-emerald-500/20"
+          onClick={() => {
+            setFormError("");
+            setSuccessCard(null);
+            setIsModalOpen(true);
+          }}
+          className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs px-5 py-3 rounded-xl transition shadow-xs flex items-center gap-2"
         >
-          + Register New Member & Fee
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
+          </svg>
+          Register New Member
         </button>
       </div>
 
-      {/* Status Notice */}
+      {/* Supabase Status Banner */}
       {statusMsg && (
-        <div className="p-3 bg-[#182C1C] border border-[#234F2A] rounded-xl text-xs text-[#4ADE80] font-mono">
-          {statusMsg}
-        </div>
-      )}
-
-      {/* Success Credentials Banner */}
-      {successCard && (
-        <div className="bg-[#122E1A] border border-[#22C55E] rounded-2xl p-5 shadow-xl text-white relative">
-          <button
-            onClick={() => setSuccessCard(null)}
-            className="absolute top-4 right-4 text-xs text-[#829E88] hover:text-white font-bold"
-          >
-            ✕ Close
+        <div className="p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold rounded-2xl flex items-center justify-between shadow-xs">
+          <span>{statusMsg}</span>
+          <button onClick={() => setStatusMsg("")} className="text-slate-400 hover:text-slate-700 font-bold text-xs cursor-pointer hover:bg-slate-100 p-1.5 rounded-lg transition">
+            ✕
           </button>
-          <div className="flex items-center gap-3 mb-2">
-            <span className="text-xl">🎉</span>
-            <h3 className="text-base font-bold text-[#4ADE80]">
-              Member & Mobile Account Created in Supabase Successfully!
-            </h3>
+        </div>
+      )}
+
+      {/* Success Credentials Card */}
+      {successCard && (
+        <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-5 shadow-xs space-y-3 relative text-slate-900">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="w-8 h-8 rounded-full bg-emerald-600 text-white flex items-center justify-center font-bold text-sm">
+                ✓
+              </span>
+              <div>
+                <h3 className="font-extrabold text-sm text-emerald-900">
+                  Member Successfully Registered in Supabase!
+                </h3>
+                <p className="text-xs text-emerald-700">
+                  Give these login details to the member for their mobile app.
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => setSuccessCard(null)}
+              className="text-slate-400 hover:text-slate-700 font-bold text-xs cursor-pointer hover:bg-slate-100 p-1.5 rounded-lg transition"
+            >
+              ✕
+            </button>
           </div>
-          <p className="text-xs text-[#A1B8A6] mb-3">
-            Give these credentials to <span className="text-white font-bold">{successCard.name}</span> to log in on their mobile phone app:
-          </p>
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 bg-[#0A1A0E] p-3.5 rounded-xl border border-[#1E4226] text-xs font-mono">
+
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 bg-white p-4 rounded-xl border border-emerald-200/80 font-mono text-xs">
             <div>
-              <span className="text-[#6D8A74] block uppercase text-[10px]">Member ID:</span>
-              <span className="text-[#4ADE80] font-bold">{successCard.memberId}</span>
+              <span className="text-[10px] text-slate-400 uppercase font-bold">Member Name</span>
+              <p className="font-bold text-slate-900">{successCard.name}</p>
             </div>
             <div>
-              <span className="text-[#6D8A74] block uppercase text-[10px]">Mobile Login Email:</span>
-              <span className="text-white font-bold">{successCard.email}</span>
+              <span className="text-[10px] text-slate-400 uppercase font-bold">Member ID</span>
+              <p className="font-extrabold text-emerald-700">{successCard.memberId}</p>
             </div>
             <div>
-              <span className="text-[#6D8A74] block uppercase text-[10px]">Default Password:</span>
-              <span className="text-[#4ADE80] font-bold">{successCard.password}</span>
+              <span className="text-[10px] text-slate-400 uppercase font-bold">App Email</span>
+              <p className="font-bold text-slate-900">{successCard.email}</p>
             </div>
             <div>
-              <span className="text-[#6D8A74] block uppercase text-[10px]">Fee Recorded:</span>
-              <span className="text-white font-bold">${successCard.feePaid}</span>
+              <span className="text-[10px] text-slate-400 uppercase font-bold">App Password</span>
+              <p className="font-extrabold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 inline-block">
+                {successCard.password}
+              </p>
             </div>
           </div>
         </div>
       )}
 
-      {/* Filter & Search Bar */}
-      <div className="bg-[#0E1B10] border border-[#1C3620] p-4 rounded-2xl flex flex-col sm:flex-row items-center gap-3">
-        <div className="relative flex-1 w-full">
+      {/* Filter Toolbar */}
+      <div className="bg-white border border-slate-200 p-4 rounded-2xl shadow-xs flex flex-col sm:flex-row items-center justify-between gap-4">
+        {/* Search */}
+        <div className="relative w-full sm:w-80">
           <input
             type="text"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="Search member by name, email, or Member ID..."
-            className="w-full bg-[#09120B] border border-[#1E3A22] rounded-xl px-4 py-2.5 pl-10 text-xs text-white placeholder-[#58735E] focus:outline-none focus:border-[#22C55E]"
+            placeholder="Search by name, email or Member ID..."
+            className="w-full bg-slate-50 border border-slate-300 rounded-xl pl-9 pr-4 py-2 text-xs text-slate-900 focus:outline-none focus:border-emerald-500 focus:bg-white"
           />
           <svg
-            className="w-4 h-4 text-[#58735E] absolute left-3.5 top-3"
+            className="w-4 h-4 text-slate-400 absolute left-3 top-2.5"
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
@@ -256,117 +397,138 @@ export default function MembersPage() {
           </svg>
         </div>
 
-        <div className="flex items-center gap-2 w-full sm:w-auto">
-          <span className="text-xs font-semibold text-[#829E88] whitespace-nowrap">Filter Status:</span>
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="bg-[#09120B] border border-[#1E3A22] rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none focus:border-[#22C55E]"
-          >
-            <option value="All">All Statuses</option>
-            <option value="Active">Active Only</option>
-            <option value="Expired">Expired Only</option>
-          </select>
+        {/* Status Filter */}
+        <div className="flex items-center gap-2 self-start sm:self-auto overflow-x-auto">
+          {["All", "Active", "Expired"].map((st) => (
+            <button
+              key={st}
+              onClick={() => setStatusFilter(st)}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition ${
+                statusFilter === st
+                  ? "bg-emerald-600 text-white shadow-xs"
+                  : "bg-slate-100 text-slate-600 hover:text-slate-900"
+              }`}
+            >
+              {st}
+            </button>
+          ))}
         </div>
       </div>
 
-      {/* Real Data Table */}
-      <div className="bg-[#0E1B10] border border-[#1C3620] rounded-2xl p-4 sm:p-6 shadow-lg overflow-hidden">
-        {loading ? (
-          <div className="py-12 text-center text-xs text-[#829E88]">
-            Loading real data from Supabase profiles table...
-          </div>
-        ) : filteredMembers.length === 0 ? (
-          <div className="py-12 text-center text-xs text-[#829E88]">
-            No members found in Supabase database. Click <span className="text-[#22C55E] font-bold">"+ Register New Member"</span> above to add your first member!
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="border-b border-[#1C3620] text-[11px] font-bold text-[#829E88] uppercase tracking-wider">
-                  <th className="py-3 px-3">Member</th>
-                  <th className="py-3 px-3">Member ID</th>
-                  <th className="py-3 px-3">Plan</th>
-                  <th className="py-3 px-3">Days Remaining</th>
-                  <th className="py-3 px-3">Status</th>
-                  <th className="py-3 px-3 text-right">Actions</th>
+      {/* Member List Table */}
+      <div className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-6 shadow-xs overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="border-b border-slate-200 text-[11px] font-bold text-slate-500 uppercase tracking-wider bg-slate-50/80">
+                <th className="py-3 px-3.5 rounded-l-lg">Member</th>
+                <th className="py-3 px-3.5">Member ID</th>
+                <th className="py-3 px-3.5">Membership Plan & Add-ons</th>
+                <th className="py-3 px-3.5">Fee Paid</th>
+                <th className="py-3 px-3.5">Status</th>
+                <th className="py-3 px-3.5 text-right rounded-r-lg">Action</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 text-xs">
+              {loading ? (
+                <tr>
+                  <td colSpan={6} className="py-10 text-center text-slate-400">
+                    Loading registered members from Supabase...
+                  </td>
                 </tr>
-              </thead>
-              <tbody className="divide-y divide-[#172D1B] text-xs">
-                {filteredMembers.map((member) => (
-                  <tr key={member.id} className="hover:bg-[#132616] transition-colors">
-                    <td className="py-3.5 px-3">
-                      <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-full bg-[#1B3B20] text-[#4ADE80] font-bold text-xs flex items-center justify-center border border-[#28572F]">
-                          {member.full_name?.charAt(0) || "M"}
-                        </div>
-                        <div>
-                          <p className="font-bold text-white leading-tight">{member.full_name}</p>
-                          <p className="text-[11px] text-[#78967E]">{member.email}</p>
-                        </div>
+              ) : filteredMembers.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="py-10 text-center text-slate-500">
+                    No members found matching filter.
+                  </td>
+                </tr>
+              ) : (
+                filteredMembers.map((m) => (
+                  <tr key={m.id} className="hover:bg-slate-50 transition-colors">
+                    {/* Member Details */}
+                    <td className="py-3.5 px-3.5 font-bold text-slate-900 flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-full bg-emerald-100 border border-emerald-200 text-emerald-800 flex items-center justify-center font-extrabold text-xs shrink-0">
+                        {m.full_name ? m.full_name.charAt(0).toUpperCase() : "M"}
+                      </div>
+                      <div>
+                        <p className="text-xs font-bold text-slate-900 leading-tight">{m.full_name}</p>
+                        <p className="text-[10px] text-slate-500">{m.email}</p>
                       </div>
                     </td>
-                    <td className="py-3.5 px-3 font-mono text-xs text-[#A1B8A6]">
-                      {member.member_id || "GP-8472-991"}
+
+                    {/* Member ID */}
+                    <td className="py-3.5 px-3.5 font-mono text-emerald-700 font-bold">{m.member_id || "GP-MEMBER"}</td>
+
+                    {/* Plan */}
+                    <td className="py-3.5 px-3.5 text-slate-700 font-medium max-w-xs truncate">
+                      {m.plan || "Pro Membership"}
                     </td>
-                    <td className="py-3.5 px-3 font-medium text-white">{member.plan || "Pro Membership"}</td>
-                    <td className="py-3.5 px-3 font-semibold text-[#A1B8A6]">
-                      {member.days_remaining ?? 30} days
+
+                    {/* Fee Paid */}
+                    <td className="py-3.5 px-3.5 font-mono font-bold text-slate-900">
+                      PKR {Number(m.fee_paid || 5000).toLocaleString()}
                     </td>
-                    <td className="py-3.5 px-3">
+
+                    {/* Status Badge */}
+                    <td className="py-3.5 px-3.5">
                       <span
                         className={`inline-block px-2.5 py-1 rounded-full text-[10px] font-bold ${
-                          member.status === "Active"
-                            ? "bg-emerald-950 text-emerald-400 border border-emerald-800"
-                            : "bg-red-950 text-red-400 border border-red-800"
+                          m.status === "Active"
+                            ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                            : "bg-rose-50 text-rose-700 border border-rose-200"
                         }`}
                       >
-                        {member.status || "Active"}
+                        ● {m.status || "Active"}
                       </span>
                     </td>
-                    <td className="py-3.5 px-3 text-right">
+
+                    {/* Action */}
+                    <td className="py-3.5 px-3.5 text-right">
                       <button
-                        onClick={() => handleToggleStatus(member.id, member.status)}
-                        className="text-xs text-[#22C55E] hover:text-[#4ADE80] font-semibold underline underline-offset-2"
+                        onClick={() => handleToggleStatus(m.id, m.status || "Active")}
+                        className={`px-3 py-1 rounded-lg text-[10px] font-bold transition border ${
+                          m.status === "Active"
+                            ? "bg-slate-100 text-slate-600 hover:text-slate-900 border-slate-200"
+                            : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border-emerald-200"
+                        }`}
                       >
-                        Toggle Status
+                        {m.status === "Active" ? "Set Expired" : "Reactivate"}
                       </button>
                     </td>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
 
-      {/* Add New Member Modal */}
+      {/* MODAL: REGISTER NEW MEMBER WITH DYNAMIC SUPABASE ADD-ONS */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#122216] border border-[#22502E] rounded-3xl p-6 sm:p-8 max-w-lg w-full shadow-2xl text-white max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-xl font-extrabold text-white">Register Member & Mobile Account</h3>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+          <div className="bg-white border border-slate-200 rounded-2xl max-w-lg w-full p-6 space-y-5 shadow-2xl text-slate-900 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+              <div>
+                <h3 className="text-base font-extrabold text-slate-900">Register New Member</h3>
+                <p className="text-[11px] text-slate-500">Create profile & select base plan + Supabase Add-On Services.</p>
+              </div>
               <button
                 onClick={() => setIsModalOpen(false)}
-                className="text-xs text-[#829E88] hover:text-white font-bold"
+                className="text-slate-400 hover:text-slate-700 font-bold text-sm cursor-pointer hover:bg-slate-100 p-1.5 rounded-lg transition"
               >
                 ✕
               </button>
             </div>
-            <p className="text-xs text-[#829E88] mb-6">
-              Enter member details. This will save their profile in Supabase and create their phone app login credentials.
-            </p>
 
             {formError && (
-              <div className="mb-4 p-3 bg-red-950/80 border border-red-800 text-red-300 rounded-xl text-xs">
-                {formError}
+              <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold rounded-xl">
+                ⚠️ {formError}
               </div>
             )}
 
             <form onSubmit={handleAddMember} className="space-y-4">
               <div>
-                <label className="block text-xs font-bold text-[#A1B8A6] uppercase mb-1">
+                <label className="block text-xs font-bold text-slate-600 uppercase mb-1">
                   Full Name *
                 </label>
                 <input
@@ -374,14 +536,14 @@ export default function MembersPage() {
                   required
                   value={newFullName}
                   onChange={(e) => setNewFullName(e.target.value)}
-                  placeholder="e.g. Hamza Malik"
-                  className="w-full bg-[#0A140D] border border-[#24472A] rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-[#22C55E]"
+                  placeholder="e.g. Muhammad Hamza"
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-emerald-500 focus:bg-white"
                 />
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-bold text-[#A1B8A6] uppercase mb-1">
+                  <label className="block text-xs font-bold text-slate-600 uppercase mb-1">
                     Member Email *
                   </label>
                   <input
@@ -390,12 +552,12 @@ export default function MembersPage() {
                     value={newEmail}
                     onChange={(e) => setNewEmail(e.target.value)}
                     placeholder="e.g. hamza@gmail.com"
-                    className="w-full bg-[#0A140D] border border-[#24472A] rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-[#22C55E]"
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-emerald-500 focus:bg-white"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-[#A1B8A6] uppercase mb-1">
+                  <label className="block text-xs font-bold text-slate-600 uppercase mb-1">
                     Phone Number
                   </label>
                   <input
@@ -403,67 +565,116 @@ export default function MembersPage() {
                     value={newPhone}
                     onChange={(e) => setNewPhone(e.target.value)}
                     placeholder="+92 300 1234567"
-                    className="w-full bg-[#0A140D] border border-[#24472A] rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-[#22C55E]"
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-emerald-500 focus:bg-white"
                   />
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-[#A1B8A6] uppercase mb-1">
-                    Membership Plan
-                  </label>
-                  <select
-                    value={newPlan}
-                    onChange={(e) => {
-                      const selectedVal = e.target.value;
-                      setNewPlan(selectedVal);
-                      const foundPlan = availablePlans.find((p) => selectedVal.includes(p.name));
-                      if (foundPlan) {
-                        const price = foundPlan.monthly_price || foundPlan.monthlyPrice || foundPlan.daily_price || foundPlan.dailyPrice || 5000;
-                        setNewFeePaid(String(price));
-                      }
-                    }}
-                    className="w-full bg-[#0A140D] border border-[#24472A] rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none focus:border-[#22C55E]"
-                  >
-                    {availablePlans.length > 0 ? (
-                      availablePlans.map((p) => {
-                        const mPrice = p.monthly_price ?? p.monthlyPrice ?? 0;
-                        const dPrice = p.daily_price ?? p.dailyPrice ?? 0;
-                        const label = mPrice > 0 ? `${p.name} (PKR ${Number(mPrice).toLocaleString()}/mo)` : `${p.name} (PKR ${Number(dPrice).toLocaleString()}/day)`;
-                        return (
-                          <option key={p.id} value={label}>
-                            {label}
-                          </option>
-                        );
-                      })
-                    ) : (
-                      <>
-                        <option value="Pro Membership (PKR 5,000/mo)">Pro Membership (PKR 5,000/mo)</option>
-                        <option value="Pro Elite Plan (PKR 9,000/mo)">Pro Elite Plan (PKR 9,000/mo)</option>
-                        <option value="Standard Plan (PKR 3,500/mo)">Standard Plan (PKR 3,500/mo)</option>
-                      </>
-                    )}
-                  </select>
-                </div>
+              {/* Base Membership Plan Dropdown */}
+              <div>
+                <label className="block text-xs font-bold text-slate-600 uppercase mb-1">
+                  Select Base Membership Plan *
+                </label>
+                <select
+                  value={newPlan}
+                  onChange={(e) => {
+                    const selectedVal = e.target.value;
+                    setNewPlan(selectedVal);
+                    updateFeeCalculation(selectedVal, selectedAddonIds);
+                  }}
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-emerald-500 focus:bg-white font-bold"
+                >
+                  {availablePlans.length > 0 ? (
+                    availablePlans.map((p) => {
+                      const mPrice = p.monthly_price ?? p.monthlyPrice ?? 0;
+                      const dPrice = p.daily_price ?? p.dailyPrice ?? 0;
+                      const label = mPrice > 0 ? `${p.name} (PKR ${Number(mPrice).toLocaleString()}/mo)` : `${p.name} (PKR ${Number(dPrice).toLocaleString()}/day)`;
+                      return (
+                        <option key={p.id} value={label}>
+                          {label}
+                        </option>
+                      );
+                    })
+                  ) : (
+                    <>
+                      <option value="Pro Membership (PKR 5,000/mo)">Pro Membership (PKR 5,000/mo)</option>
+                      <option value="Standard Monthly Pass (PKR 3,500/mo)">Standard Monthly Pass (PKR 3,500/mo)</option>
+                      <option value="VIP Champion Pass (PKR 9,000/mo)">VIP Champion Pass (PKR 9,000/mo)</option>
+                    </>
+                  )}
+                </select>
+              </div>
 
-                <div>
-                  <label className="block text-xs font-bold text-[#A1B8A6] uppercase mb-1">
-                    Fee Collected (PKR)
-                  </label>
-                  <input
-                    type="number"
-                    step="1"
-                    required
-                    value={newFeePaid}
-                    onChange={(e) => setNewFeePaid(e.target.value)}
-                    className="w-full bg-[#0A140D] border border-[#24472A] rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-[#22C55E]"
-                  />
+              {/* Dynamic Stackable Add-On Options fetched from Supabase */}
+              <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="block text-xs font-extrabold text-slate-900 uppercase tracking-wider">
+                    Stackable Add-On Services (Fetched from Supabase)
+                  </span>
+                  <span className="text-[10px] text-emerald-700 font-mono font-bold">Live Supabase</span>
+                </div>
+                <p className="text-[11px] text-slate-500">
+                  Select optional service add-ons to stack onto the base plan:
+                </p>
+
+                <div className="space-y-2 pt-1 max-h-48 overflow-y-auto pr-1">
+                  {availableAddons.map((addon) => {
+                    const isChecked = selectedAddonIds.includes(addon.id);
+                    return (
+                      <label
+                        key={addon.id}
+                        className={`flex items-center gap-2.5 p-2 bg-white border rounded-lg cursor-pointer transition ${
+                          isChecked ? "border-emerald-500 ring-1 ring-emerald-500/20" : "border-slate-200 hover:border-slate-300"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => handleToggleAddonCheck(addon.id)}
+                          className="w-4 h-4 text-emerald-600 rounded focus:ring-emerald-500"
+                        />
+                        <div className="flex-1 flex items-center justify-between text-xs">
+                          <span className="font-bold text-slate-900 flex items-center gap-1.5">
+                            <span>{addon.icon || "🏃"}</span>
+                            {addon.name}
+                          </span>
+                          <span className="font-mono text-emerald-700 font-extrabold">
+                            +PKR {Number(addon.price || 0).toLocaleString()}/mo
+                          </span>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Total Fee Collected Calculation */}
+              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs space-y-1">
+                <div className="flex justify-between items-center text-slate-600">
+                  <span>Base Plan Fee:</span>
+                  <span className="font-mono font-bold text-slate-800">PKR {Number(baseFee).toLocaleString()}</span>
+                </div>
+                {selectedAddonIds.length > 0 && (
+                  <div className="flex justify-between items-center text-slate-600">
+                    <span>Selected Supabase Add-ons ({selectedAddonIds.length}):</span>
+                    <span className="font-mono font-bold text-emerald-700">
+                      +PKR {Number(
+                        selectedAddonIds.reduce((acc, id) => {
+                          const m = availableAddons.find((a) => a.id === id);
+                          return acc + (m ? Number(m.price || 0) : 0);
+                        }, 0)
+                      ).toLocaleString()}
+                    </span>
+                  </div>
+                )}
+                <div className="flex justify-between items-center pt-1.5 border-t border-emerald-200 text-slate-900 font-extrabold text-sm">
+                  <span>Total Fee Collected Now:</span>
+                  <span className="font-mono text-emerald-700 font-black text-base">PKR {Number(newFeePaid).toLocaleString()}</span>
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-[#4ADE80] uppercase mb-1">
+                <label className="block text-xs font-bold text-emerald-700 uppercase mb-1">
                   Mobile App Password *
                 </label>
                 <input
@@ -472,25 +683,25 @@ export default function MembersPage() {
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
                   placeholder="12345678"
-                  className="w-full bg-[#0A140D] border border-[#22C55E] rounded-xl px-4 py-2.5 text-xs text-[#4ADE80] font-mono font-bold focus:outline-none"
+                  className="w-full bg-emerald-50/50 border border-emerald-300 rounded-xl px-4 py-2.5 text-xs text-emerald-800 font-mono font-bold focus:outline-none focus:border-emerald-500"
                 />
-                <span className="text-[11px] text-[#829E88] mt-1 block">
+                <span className="text-[11px] text-slate-500 mt-1 block">
                   Member uses this password (`12345678`) to log in on their mobile phone app.
                 </span>
               </div>
 
-              <div className="flex items-center justify-end gap-3 pt-4 border-t border-[#1C3D22]">
+              <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-200">
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}
-                  className="text-xs text-[#829E88] hover:text-white px-4 py-2.5 rounded-xl font-bold"
+                  className="text-xs text-slate-500 hover:text-slate-800 px-4 py-2.5 rounded-xl font-bold"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={submitting}
-                  className="bg-[#22C55E] hover:bg-[#16A34A] text-black font-bold text-xs px-6 py-3 rounded-xl transition shadow-lg shadow-emerald-500/20"
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs px-6 py-3 rounded-xl transition shadow-xs"
                 >
                   {submitting ? "SAVING TO SUPABASE..." : "CREATE MEMBER & MOBILE ACCESS"}
                 </button>
@@ -499,6 +710,9 @@ export default function MembersPage() {
           </div>
         </div>
       )}
+
+      {/* REUSABLE LOADING ANIMATION OVERLAY */}
+      <LoadingOverlay isLoading={submitting} message="Registering Member Profile & Provisioning Mobile Credentials..." />
     </div>
   );
 }

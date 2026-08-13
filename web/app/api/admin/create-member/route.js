@@ -97,13 +97,15 @@ export async function POST(request) {
 
     // Insert fee in public.payments
     try {
+      const numericFee = parseFloat(fee_paid) || 5000;
       await supabasePublic.from("payments").insert([
         {
           user_id: userId,
-          amount: parseFloat(fee_paid) || 50.0,
+          amount: numericFee,
           status: "Paid",
           payment_method: "Cash / Desk",
-          invoice_id: `INV-2024-${Math.floor(1000 + Math.random() * 9000)}`,
+          invoice_id: `INV-2026-${Math.floor(1000 + Math.random() * 9000)}`,
+          date: new Date().toISOString(),
         },
       ]);
     } catch (payErr) {

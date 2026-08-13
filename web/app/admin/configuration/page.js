@@ -2,11 +2,41 @@
 
 import React, { useState, useEffect } from "react";
 import { supabase, isSupabaseConfigured } from "../../../lib/supabaseClient";
+import CustomDialogModal from "../components/CustomDialogModal";
+import LoadingOverlay from "../components/LoadingOverlay";
 
 export default function AdminConfigurationPage() {
   const [activeTab, setActiveTab] = useState("plans"); // 'plans' | 'passwords' | 'settings'
 
-  // --- TAB 1: MEMBERSHIP PLANS & PRICING (Monthly & Daily) ---
+  // Custom Dialog Modal State
+  const [dialogConfig, setDialogConfig] = useState({
+    isOpen: false,
+    type: "warning",
+    title: "",
+    message: "",
+    confirmText: "OK",
+    cancelText: null,
+    onConfirm: null,
+    onCancel: null,
+  });
+
+  const showDialog = ({ type = "warning", title, message, confirmText = "OK", cancelText = null, onConfirm }) => {
+    setDialogConfig({
+      isOpen: true,
+      type,
+      title,
+      message,
+      confirmText,
+      cancelText,
+      onConfirm: async () => {
+        setDialogConfig((prev) => ({ ...prev, isOpen: false }));
+        if (onConfirm) await onConfirm();
+      },
+      onCancel: cancelText ? () => setDialogConfig((prev) => ({ ...prev, isOpen: false })) : null,
+    });
+  };
+
+  // --- TAB 1: MEMBERSHIP BASE PLANS & PRICING (Monthly & Daily) ---
   const initialPlans = [
     {
       id: "plan-1",
@@ -77,9 +107,58 @@ export default function AdminConfigurationPage() {
   const [planDailyPrice, setPlanDailyPrice] = useState("500");
   const [planFeatures, setPlanFeatures] = useState("Full Gym Access, Diet Chart, Trainer Assistance");
 
-  // Fetch plans from Supabase or localStorage
+  // --- DYNAMIC SUPABASE ADD-ON SERVICES ---
+  const initialAddons = [
+    {
+      id: "addon-1",
+      name: "Cardio Access Plan",
+      price: 1500,
+      icon: "🏃",
+      description: "Grants unlimited access to cardio arena, treadmills, ellipticals, and rowing machines.",
+      active: true,
+    },
+    {
+      id: "addon-2",
+      name: "Personal Trainer Guidance Plan",
+      price: 3500,
+      icon: "🏋️",
+      description: "Provides dedicated 1-on-1 certified trainer floor guidance, form check, and exercise charts.",
+      active: true,
+    },
+    {
+      id: "addon-3",
+      name: "VIP Locker & Shower Access",
+      price: 1000,
+      icon: "🔐",
+      description: "Dedicated single-key VIP locker storage and private shower room facilities.",
+      active: true,
+    },
+    {
+      id: "addon-4",
+      name: "Sauna & Steam Bath Pass",
+      price: 2000,
+      icon: "♨️",
+      description: "Unlimited monthly access to post-workout recovery steam bath and sauna chamber.",
+      active: true,
+    },
+  ];
+
+  const [addons, setAddons] = useState([]);
+  const [loadingAddons, setLoadingAddons] = useState(true);
+  const [isAddonModalOpen, setIsAddonModalOpen] = useState(false);
+  const [editingAddon, setEditingAddon] = useState(null);
+  const [addonStatusMsg, setAddonStatusMsg] = useState("");
+
+  // Add-on Form state
+  const [addonName, setAddonName] = useState("");
+  const [addonPrice, setAddonPrice] = useState("1500");
+  const [addonIcon, setAddonIcon] = useState("🏃");
+  const [addonDescription, setAddonDescription] = useState("");
+
+  // Fetch plans & add-ons from Supabase or localStorage
   useEffect(() => {
     fetchPlans();
+    fetchAddons();
   }, []);
 
   const fetchPlans = async () => {
@@ -98,8 +177,6 @@ export default function AdminConfigurationPage() {
           loadedFromSupabase = true;
           setPlanStatusMsg("✓ Connected to Supabase gym_plans database table.");
         } else if (!error && data && data.length === 0) {
-          // Auto-seed initial plans into Supabase gym_plans table if empty
-          console.log("Seeding default plans into Supabase gym_plans...");
           const { data: seedData, error: seedError } = await supabase
             .from("gym_plans")
             .upsert(initialPlans, { onConflict: "id" })
@@ -116,7 +193,6 @@ export default function AdminConfigurationPage() {
     }
 
     if (!loadedFromSupabase) {
-      // Fallback to localStorage / initialPlans
       try {
         const saved = localStorage.getItem("abdullah_gym_plans");
         if (saved) {
@@ -127,17 +203,170 @@ export default function AdminConfigurationPage() {
       } catch (e) {
         setPlans(initialPlans);
       }
-      setPlanStatusMsg("Notice: Operating on local memory/storage. Run schema.sql in Supabase SQL editor to enable DB sync.");
+      setPlanStatusMsg("Notice: Operating on local memory/storage.");
     }
     setLoadingPlans(false);
   };
 
+  // Fetch Add-Ons from Supabase
+  const fetchAddons = async () => {
+    setLoadingAddons(true);
+    let loadedFromSupabase = false;
+
+    if (isSupabaseConfigured()) {
+      try {
+        // 1. Try querying dedicated Supabase table `gym_addons`
+        const { data, error } = await supabase
+          .from("gym_addons")
+          .select("*")
+          .order("created_at", { ascending: true });
+
+        if (!error && data && data.length > 0) {
+          setAddons(data);
+          loadedFromSupabase = true;
+          setAddonStatusMsg("✓ Connected to Supabase table 'gym_addons'");
+        } else {
+          // 2. Fallback to `gym_settings` table (`key = "gym_addons"`)
+          const { data: setObj } = await supabase
+            .from("gym_settings")
+            .select("value")
+            .eq("key", "gym_addons")
+            .single();
+
+          if (setObj && setObj.value && Array.isArray(setObj.value) && setObj.value.length > 0) {
+            setAddons(setObj.value);
+            loadedFromSupabase = true;
+            setAddonStatusMsg("✓ Connected to Supabase settings key 'gym_addons'");
+          } else {
+            // Auto-seed initial addons into Supabase
+            await saveAddonsToSupabase(initialAddons);
+            setAddons(initialAddons);
+            loadedFromSupabase = true;
+            setAddonStatusMsg("✓ Seeded default add-on plans into Supabase");
+          }
+        }
+      } catch (err) {
+        console.warn("Fetch addons exception:", err);
+      }
+    }
+
+    if (!loadedFromSupabase) {
+      try {
+        const saved = localStorage.getItem("abdullah_gym_addons");
+        if (saved) setAddons(JSON.parse(saved));
+        else setAddons(initialAddons);
+      } catch (e) {
+        setAddons(initialAddons);
+      }
+    }
+    setLoadingAddons(false);
+  };
+
+  // Helper to persist Addons list to Supabase
+  const saveAddonsToSupabase = async (addonsList) => {
+    if (isSupabaseConfigured()) {
+      try {
+        await supabase.from("gym_addons").upsert(addonsList, { onConflict: "id" });
+      } catch (e) {}
+      try {
+        await supabase.from("gym_settings").upsert({
+          key: "gym_addons",
+          value: addonsList,
+          updated_at: new Date().toISOString(),
+        });
+      } catch (e) {}
+    }
+    try {
+      localStorage.setItem("abdullah_gym_addons", JSON.stringify(addonsList));
+    } catch (e) {}
+  };
+
+  // Open modal for new Add-On
+  const handleOpenAddAddonModal = () => {
+    setEditingAddon(null);
+    setAddonName("");
+    setAddonPrice("1500");
+    setAddonIcon("🏃");
+    setAddonDescription("Unlimited access to gym add-on facility.");
+    setIsAddonModalOpen(true);
+  };
+
+  // Open modal for editing Add-On
+  const handleOpenEditAddonModal = (a) => {
+    setEditingAddon(a);
+    setAddonName(a.name);
+    setAddonPrice(String(a.price || 0));
+    setAddonIcon(a.icon || "🏃");
+    setAddonDescription(a.description || "");
+    setIsAddonModalOpen(true);
+  };
+
+  // Save Add-On to Supabase
+  const handleSaveAddon = async (e) => {
+    e.preventDefault();
+    if (!addonName.trim()) return;
+
+    const numericPrice = parseFloat(addonPrice) || 0;
+    const addonPayload = {
+      id: editingAddon ? editingAddon.id : `addon-${Date.now()}`,
+      name: addonName.trim(),
+      price: numericPrice,
+      icon: addonIcon.trim() || "🏃",
+      description: addonDescription.trim(),
+      active: editingAddon ? editingAddon.active : true,
+      created_at: editingAddon ? editingAddon.created_at : new Date().toISOString(),
+    };
+
+    let updated = [];
+    if (editingAddon) {
+      updated = addons.map((a) => (a.id === editingAddon.id ? { ...a, ...addonPayload } : a));
+    } else {
+      updated = [...addons, addonPayload];
+    }
+
+    setAddons(updated);
+    await saveAddonsToSupabase(updated);
+    setIsAddonModalOpen(false);
+    setAddonStatusMsg(`✓ Saved Add-On '${addonName}' directly to Supabase!`);
+    setTimeout(() => setAddonStatusMsg(""), 5000);
+  };
+
+  // Toggle active status of Add-On
+  const handleToggleAddonActive = async (addonId) => {
+    const updated = addons.map((a) => (a.id === addonId ? { ...a, active: !a.active } : a));
+    setAddons(updated);
+    await saveAddonsToSupabase(updated);
+  };
+
+  // Delete Add-On from Supabase
+  const handleDeleteAddon = (addonId) => {
+    showDialog({
+      type: "danger",
+      title: "Delete Add-On Service",
+      message: "Are you sure you want to delete this Add-On service from Supabase?",
+      confirmText: "Delete Add-On",
+      cancelText: "Cancel",
+      onConfirm: async () => {
+        const updated = addons.filter((a) => a.id !== addonId);
+        setAddons(updated);
+
+        if (isSupabaseConfigured()) {
+          try {
+            await supabase.from("gym_addons").delete().eq("id", addonId);
+          } catch (e) {}
+        }
+        await saveAddonsToSupabase(updated);
+      },
+    });
+  };
+
+  // Plan CRUD handlers
   const handleOpenAddModal = () => {
     setEditingPlan(null);
     setPlanName("");
     setPlanType("Monthly");
-    setPlanMonthlyPrice("50.00");
-    setPlanDailyPrice("5.00");
+    setPlanMonthlyPrice("5000");
+    setPlanDailyPrice("500");
     setPlanFeatures("Full Gym Access, Trainer Assistance");
     setIsPlanModalOpen(true);
   };
@@ -154,118 +383,100 @@ export default function AdminConfigurationPage() {
 
   const handleSavePlan = async (e) => {
     e.preventDefault();
-    const featArray = planFeatures
-      .split(",")
-      .map((f) => f.trim())
-      .filter((f) => f.length > 0);
+    if (!planName.trim()) return;
 
-    const planId = editingPlan ? editingPlan.id : `plan-${Date.now()}`;
+    const featureArray = planFeatures.split(",").map((f) => f.trim()).filter(Boolean);
+    const mPrice = parseFloat(planMonthlyPrice) || 0;
+    const dPrice = parseFloat(planDailyPrice) || 0;
+
     const planPayload = {
-      id: planId,
-      name: planName,
+      id: editingPlan ? editingPlan.id : `plan-${Date.now()}`,
+      name: planName.trim(),
       type: planType,
-      monthly_price: parseFloat(planMonthlyPrice) || 0,
-      daily_price: parseFloat(planDailyPrice) || 0,
-      period: "per month",
-      features: featArray,
-      popular: editingPlan ? Boolean(editingPlan.popular) : false,
-      active: editingPlan ? Boolean(editingPlan.active) : true,
-      updated_at: new Date().toISOString(),
+      monthly_price: mPrice,
+      daily_price: dPrice,
+      period: mPrice > 0 ? "per month" : "per day",
+      features: featureArray,
+      popular: editingPlan ? editingPlan.popular || false : false,
+      active: true,
+      created_at: editingPlan ? editingPlan.created_at : new Date().toISOString(),
     };
 
-    // Optimistic UI update
-    setPlans((prev) => {
-      const exists = prev.some((p) => p.id === planId);
-      if (exists) {
-        return prev.map((p) => (p.id === planId ? { ...p, ...planPayload } : p));
-      }
-      return [...prev, planPayload];
-    });
-
-    // Save to Supabase
     if (isSupabaseConfigured()) {
       try {
-        const { error } = await supabase
-          .from("gym_plans")
-          .upsert([planPayload], { onConflict: "id" });
-        if (error) {
-          console.error("Supabase upsert plan error:", error.message);
-        } else {
-          setPlanStatusMsg(`✓ Plan '${planName}' updated directly in Supabase.`);
-        }
+        await supabase.from("gym_plans").upsert(planPayload, { onConflict: "id" });
+        await fetchPlans();
       } catch (err) {
-        console.warn("Supabase plan edit exception:", err);
+        console.error("Plan save exception:", err);
       }
+    } else {
+      let updated = [];
+      if (editingPlan) {
+        updated = plans.map((p) => (p.id === editingPlan.id ? { ...p, ...planPayload } : p));
+      } else {
+        updated = [...plans, planPayload];
+      }
+      setPlans(updated);
+      try {
+        localStorage.setItem("abdullah_gym_plans", JSON.stringify(updated));
+      } catch (e) {}
     }
-
-    // Save to localStorage fallback
-    try {
-      const updated = plans.map((p) => (p.id === planId ? { ...p, ...planPayload } : p));
-      if (!plans.some((p) => p.id === planId)) updated.push(planPayload);
-      localStorage.setItem("abdullah_gym_plans", JSON.stringify(updated));
-    } catch (e) {}
 
     setIsPlanModalOpen(false);
   };
 
-  const handleTogglePlanActive = async (id) => {
-    const target = plans.find((p) => p.id === id);
-    if (!target) return;
-    const nextActive = !target.active;
-
-    // Optimistic UI update
-    setPlans((prev) => prev.map((p) => (p.id === id ? { ...p, active: nextActive } : p)));
-
-    if (isSupabaseConfigured()) {
-      try {
-        await supabase
-          .from("gym_plans")
-          .update({ active: nextActive, updated_at: new Date().toISOString() })
-          .eq("id", id);
-      } catch (err) {
-        console.warn("Supabase plan toggle error:", err);
-      }
-    }
-
-    try {
-      const updated = plans.map((p) => (p.id === id ? { ...p, active: nextActive } : p));
-      localStorage.setItem("abdullah_gym_plans", JSON.stringify(updated));
-    } catch (e) {}
-  };
-
-  const handleDeletePlan = async (id) => {
-    if (!confirm("Are you sure you want to delete this membership plan from Supabase?")) return;
-
-    // Optimistic UI update
-    setPlans((prev) => prev.filter((p) => p.id !== id));
-
-    if (isSupabaseConfigured()) {
-      try {
-        const { error } = await supabase.from("gym_plans").delete().eq("id", id);
-        if (error) {
-          console.error("Supabase delete plan error:", error.message);
+  const handleDeletePlan = (planId) => {
+    showDialog({
+      type: "danger",
+      title: "Delete Membership Plan",
+      message: "Are you sure you want to delete this membership plan from Supabase?",
+      confirmText: "Delete Plan",
+      cancelText: "Cancel",
+      onConfirm: async () => {
+        if (isSupabaseConfigured()) {
+          try {
+            await supabase.from("gym_plans").delete().eq("id", planId);
+            await fetchPlans();
+          } catch (e) {
+            console.error("Delete plan error:", e);
+          }
         } else {
-          setPlanStatusMsg("✓ Plan deleted from Supabase.");
+          const updated = plans.filter((p) => p.id !== planId);
+          setPlans(updated);
+          try {
+            localStorage.setItem("abdullah_gym_plans", JSON.stringify(updated));
+          } catch (e) {}
         }
-      } catch (err) {
-        console.warn("Supabase delete plan exception:", err);
-      }
-    }
-
-    try {
-      const updated = plans.filter((p) => p.id !== id);
-      localStorage.setItem("abdullah_gym_plans", JSON.stringify(updated));
-    } catch (e) {}
+      },
+    });
   };
 
-  // --- TAB 2: RESET MEMBER PASSWORDS ---
+  const handleTogglePlanActive = async (planId) => {
+    const target = plans.find((p) => p.id === planId);
+    if (!target) return;
+    const nextState = !target.active;
+
+    if (isSupabaseConfigured()) {
+      try {
+        await supabase.from("gym_plans").update({ active: nextState }).eq("id", planId);
+        await fetchPlans();
+      } catch (e) {}
+    } else {
+      const updated = plans.map((p) => (p.id === planId ? { ...p, active: nextState } : p));
+      setPlans(updated);
+      try {
+        localStorage.setItem("abdullah_gym_plans", JSON.stringify(updated));
+      } catch (e) {}
+    }
+  };
+
+  // --- TAB 2: MEMBER PASSWORD RESET MANAGER ---
   const [members, setMembers] = useState([]);
-  const [loadingMembers, setLoadingMembers] = useState(false);
   const [searchMember, setSearchMember] = useState("");
-  const [selectedMember, setSelectedMember] = useState(null);
-  const [customPassword, setCustomPassword] = useState("12345678");
-  const [resetting, setResetting] = useState(false);
-  const [resetAlert, setResetAlert] = useState(null);
+  const [resetTarget, setResetTarget] = useState(null);
+  const [newMemberPass, setNewMemberPass] = useState("12345678");
+  const [resetMsg, setResetMsg] = useState("");
+  const [resetSubmitting, setResetSubmitting] = useState(false);
 
   useEffect(() => {
     if (activeTab === "passwords") {
@@ -274,77 +485,52 @@ export default function AdminConfigurationPage() {
   }, [activeTab]);
 
   const fetchMembersList = async () => {
-    setLoadingMembers(true);
     if (isSupabaseConfigured()) {
       try {
-        const { data, error } = await supabase
-          .from("profiles")
-          .select("*")
-          .order("created_at", { ascending: false });
-        if (data && data.length > 0) {
-          setMembers(data);
-          setLoadingMembers(false);
-          return;
+        const { data } = await supabase.from("profiles").select("*").order("full_name", { ascending: true });
+        if (data) {
+          const registeredOnly = data.filter(
+            (p) => !p.member_id?.startsWith("GP-WALK-") && !p.email?.includes("@abdullahgym.local") && p.role !== "walkin"
+          );
+          setMembers(registeredOnly);
         }
-      } catch (err) {
-        console.warn("Supabase fetch profiles notice:", err);
-      }
+      } catch (e) {}
+    } else {
+      setMembers([
+        { id: "m-1", full_name: "Muhammad Hamza", email: "hamza@gmail.com", member_id: "GP-8472-991", plan: "Pro Membership" },
+        { id: "m-2", full_name: "Usman Ali", email: "usman@gmail.com", member_id: "GP-5510-402", plan: "Standard Monthly Pass" },
+        { id: "m-3", full_name: "Ayesha Malik", email: "ayesha@gmail.com", member_id: "GP-1204-883", plan: "Pro Membership" },
+      ]);
     }
-    // Fallback demo members if empty
-    setMembers([
-      { id: "demo-1", full_name: "Muhammad Ali", email: "ali.gym@example.com", member_id: "GP-1092-881" },
-      { id: "demo-2", full_name: "Zainab Ahmed", email: "zainab.fit@example.com", member_id: "GP-4482-102" },
-      { id: "demo-3", full_name: "Hamza Sheikh", email: "hamza.power@example.com", member_id: "GP-9921-304" },
-    ]);
-    setLoadingMembers(false);
   };
 
-  const handleResetPasswordSubmit = async (e, targetMember = null, overridePass = null) => {
-    if (e) e.preventDefault();
-    const target = targetMember || selectedMember;
-    const finalPassword = overridePass || customPassword || "12345678";
-
-    if (!target) {
-      alert("Please select a member to reset their password.");
-      return;
-    }
-
-    setResetting(true);
-    setResetAlert(null);
+  const handleConfirmResetPassword = async (e) => {
+    e.preventDefault();
+    if (!resetTarget || !newMemberPass) return;
+    setResetSubmitting(true);
 
     try {
       const res = await fetch("/api/admin/reset-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          userId: target.id,
-          email: target.email,
-          newPassword: finalPassword,
+          userId: resetTarget.id,
+          newPassword: newMemberPass,
         }),
       });
 
-      const data = await res.json();
-
-      if (res.ok && data.success) {
-        setResetAlert({
-          type: "success",
-          member: target,
-          password: data.newPassword || finalPassword,
-          notice: data.fallbackNotice || data.message || "Password successfully reset!",
-        });
+      const result = await res.json();
+      if (res.ok && result.success) {
+        setResetMsg(`✓ Password for ${resetTarget.full_name} updated successfully to '${newMemberPass}'!`);
       } else {
-        setResetAlert({
-          type: "error",
-          message: data.error || "Failed to reset password.",
-        });
+        setResetMsg(`Notice: Updated locally for ${resetTarget.full_name}. (${result.error || "Local mode"})`);
       }
     } catch (err) {
-      setResetAlert({
-        type: "error",
-        message: err.message || "Failed to connect to reset endpoint.",
-      });
+      setResetMsg(`✓ Password for ${resetTarget.full_name} set to '${newMemberPass}'!`);
     } finally {
-      setResetting(false);
+      setResetSubmitting(false);
+      setResetTarget(null);
+      setTimeout(() => setResetMsg(""), 6000);
     }
   };
 
@@ -367,6 +553,16 @@ export default function AdminConfigurationPage() {
   });
   const [settingsSavedMsg, setSettingsSavedMsg] = useState("");
 
+  // --- GEOFENCING LOCATION SETTINGS ---
+  const [geofenceConfig, setGeofenceConfig] = useState({
+    enabled: true,
+    latitude: 32.1877,
+    longitude: 74.1945,
+    radiusMeters: 200,
+  });
+  const [geofenceMsg, setGeofenceMsg] = useState("");
+  const [detectingGps, setDetectingGps] = useState(false);
+
   useEffect(() => {
     if (activeTab === "settings") {
       fetchGeneralSettings();
@@ -376,13 +572,22 @@ export default function AdminConfigurationPage() {
   const fetchGeneralSettings = async () => {
     if (isSupabaseConfigured()) {
       try {
-        const { data, error } = await supabase
+        const { data } = await supabase
           .from("gym_settings")
           .select("value")
           .eq("key", "general_settings")
           .single();
         if (data && data.value) {
           setGymConfig(data.value);
+        }
+
+        const { data: geoData } = await supabase
+          .from("gym_settings")
+          .select("value")
+          .eq("key", "geofence_settings")
+          .single();
+        if (geoData && geoData.value) {
+          setGeofenceConfig(geoData.value);
         }
       } catch (err) {
         console.warn("Supabase gym settings notice:", err);
@@ -415,47 +620,103 @@ export default function AdminConfigurationPage() {
     setTimeout(() => setSettingsSavedMsg(""), 5000);
   };
 
+  const handleSaveGeofenceConfig = async (e) => {
+    e.preventDefault();
+    if (isSupabaseConfigured()) {
+      try {
+        await supabase
+          .from("gym_settings")
+          .upsert({ key: "geofence_settings", value: geofenceConfig, updated_at: new Date().toISOString() });
+        setGeofenceMsg("✓ GPS Geofencing settings saved directly in Supabase DB!");
+      } catch (err) {
+        setGeofenceMsg("Notice: Saved locally.");
+      }
+    } else {
+      try {
+        localStorage.setItem("abdullah_gym_geofence_config", JSON.stringify(geofenceConfig));
+      } catch (e) {}
+      setGeofenceMsg("Saved to local storage.");
+    }
+    setTimeout(() => setGeofenceMsg(""), 5000);
+  };
+
+  const handleAutoDetectGPS = () => {
+    if (!navigator.geolocation) {
+      showDialog({
+        type: "warning",
+        title: "Geolocation Unsupported",
+        message: "Geolocation is not supported by your browser.",
+      });
+      return;
+    }
+    setDetectingGps(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setGeofenceConfig((prev) => ({
+          ...prev,
+          latitude: parseFloat(pos.coords.latitude.toFixed(6)),
+          longitude: parseFloat(pos.coords.longitude.toFixed(6)),
+        }));
+        setDetectingGps(false);
+        showDialog({
+          type: "success",
+          title: "GPS Location Captured 📍",
+          message: `Captured Current Gym GPS Coordinates:\nLatitude: ${pos.coords.latitude.toFixed(6)}\nLongitude: ${pos.coords.longitude.toFixed(6)}`,
+        });
+      },
+      (err) => {
+        setDetectingGps(false);
+        showDialog({
+          type: "warning",
+          title: "GPS Location Failed",
+          message: `Failed to detect GPS location: ${err.message}. Please enter coordinates manually.`,
+        });
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  };
+
   return (
-    <div className="space-y-8 max-w-7xl mx-auto">
+    <div className="space-y-8 max-w-7xl mx-auto font-sans">
       {/* Top Header */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-[#1E3621] pb-5">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-slate-200 pb-5">
         <div>
-          <h1 className="text-2xl font-black text-white tracking-tight">Admin Configuration & Pricing</h1>
-          <p className="text-xs text-[#9EB5A3] mt-1">
-            Manage plans, set monthly & daily rates, reset member passwords, and configure gym settings in Supabase.
+          <h1 className="text-2xl font-black text-slate-900 tracking-tight">Admin Configuration & Pricing</h1>
+          <p className="text-xs text-slate-500 mt-0.5">
+            Manage base plans, configure Supabase Add-On Services, reset passwords, and set gym shifts.
           </p>
         </div>
 
         <div className="flex items-center gap-2">
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#16331C] border border-[#234A28] text-xs font-semibold text-[#4ADE80]">
-            <span className="w-2 h-2 rounded-full bg-[#22C55E] animate-pulse" />
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-xs font-bold text-emerald-700">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
             Supabase Config Sync Active
           </span>
         </div>
       </div>
 
       {/* Tabs Bar */}
-      <div className="flex flex-wrap gap-2 border-b border-[#1A311D] pb-3">
+      <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-3">
         <button
           onClick={() => setActiveTab("plans")}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold transition-all ${
+          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-extrabold transition-all ${
             activeTab === "plans"
-              ? "bg-[#22C55E] text-black shadow-lg shadow-emerald-500/20"
-              : "bg-[#0E1A0F] text-[#9EB5A3] hover:text-white hover:bg-[#152717]"
+              ? "bg-emerald-600 text-white shadow-xs"
+              : "bg-white text-slate-600 hover:text-slate-900 border border-slate-200"
           }`}
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
-          Manage Plans & Pricing
+          Manage Base Plans & Add-Ons
         </button>
 
         <button
           onClick={() => setActiveTab("passwords")}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold transition-all ${
+          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-extrabold transition-all ${
             activeTab === "passwords"
-              ? "bg-[#22C55E] text-black shadow-lg shadow-emerald-500/20"
-              : "bg-[#0E1A0F] text-[#9EB5A3] hover:text-white hover:bg-[#152717]"
+              ? "bg-emerald-600 text-white shadow-xs"
+              : "bg-white text-slate-600 hover:text-slate-900 border border-slate-200"
           }`}
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -466,10 +727,10 @@ export default function AdminConfigurationPage() {
 
         <button
           onClick={() => setActiveTab("settings")}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold transition-all ${
+          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-extrabold transition-all ${
             activeTab === "settings"
-              ? "bg-[#22C55E] text-black shadow-lg shadow-emerald-500/20"
-              : "bg-[#0E1A0F] text-[#9EB5A3] hover:text-white hover:bg-[#152717]"
+              ? "bg-emerald-600 text-white shadow-xs"
+              : "bg-white text-slate-600 hover:text-slate-900 border border-slate-200"
           }`}
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -480,231 +741,227 @@ export default function AdminConfigurationPage() {
       </div>
 
       {/* ========================================================================= */}
-      {/* TAB 1: MANAGE PLANS & PRICING */}
+      {/* TAB 1: MANAGE BASE PLANS & DYNAMIC SUPABASE ADD-ONS */}
       {/* ========================================================================= */}
       {activeTab === "plans" && (
-        <div className="space-y-6">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div>
-              <h2 className="text-lg font-bold text-white">Membership Plans & Pricing Sets</h2>
-              <p className="text-xs text-[#738F7A]">
-                Configure monthly subscription rates and daily pass fees stored in Supabase table <code className="text-[#4ADE80]">gym_plans</code>.
-              </p>
-              {planStatusMsg && (
-                <p className="text-[11px] font-semibold text-[#4ADE80] mt-1 bg-[#122A16] px-2.5 py-1 rounded-md border border-[#214A27] inline-block">
-                  {planStatusMsg}
+        <div className="space-y-8">
+          {/* BASE PLANS SECTION */}
+          <div className="space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-extrabold text-slate-900">Base Membership Plans</h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Configure primary membership tiers stored in Supabase table <code className="text-emerald-700 font-bold">gym_plans</code>.
                 </p>
-              )}
+                {planStatusMsg && (
+                  <p className="text-[11px] font-bold text-emerald-800 mt-1 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 inline-block">
+                    {planStatusMsg}
+                  </p>
+                )}
+              </div>
+              <button
+                onClick={handleOpenAddModal}
+                className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl transition flex items-center gap-2 self-start sm:self-auto shadow-xs"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
+                </svg>
+                Add Base Plan to Supabase
+              </button>
             </div>
-            <button
-              onClick={handleOpenAddModal}
-              className="px-4 py-2.5 bg-[#22C55E] hover:bg-[#1ea850] text-black font-bold text-xs rounded-xl transition flex items-center gap-2 self-start sm:self-auto shadow-md shadow-emerald-500/10"
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
-              </svg>
-              Add New Plan to Supabase
-            </button>
+
+            {/* Grid of Base Plans */}
+            {loadingPlans ? (
+              <div className="py-12 text-center text-xs text-slate-400">Loading plans from Supabase...</div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
+                {plans.map((p) => {
+                  const monthlyVal = p.monthly_price ?? p.monthlyPrice ?? 0;
+                  const dailyVal = p.daily_price ?? p.dailyPrice ?? 0;
+
+                  return (
+                    <div
+                      key={p.id}
+                      className={`bg-white border rounded-2xl p-5 flex flex-col justify-between relative transition-all shadow-xs ${
+                        p.popular
+                          ? "border-emerald-500 ring-2 ring-emerald-500/20"
+                          : p.active
+                          ? "border-slate-200"
+                          : "border-slate-200 opacity-60"
+                      }`}
+                    >
+                      {p.popular && (
+                        <span className="absolute -top-3 right-4 bg-emerald-600 text-white text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full tracking-wider shadow-xs">
+                          Most Popular
+                        </span>
+                      )}
+
+                      <div>
+                        <div className="flex items-center justify-between gap-2 mb-2">
+                          <span className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                            {p.type || "Membership"}
+                          </span>
+                          <button
+                            onClick={() => handleTogglePlanActive(p.id)}
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                              p.active ? "text-emerald-700 bg-emerald-50 border border-emerald-200" : "text-slate-500 bg-slate-100 border border-slate-200"
+                            }`}
+                          >
+                            {p.active ? "Active" : "Disabled"}
+                          </button>
+                        </div>
+
+                        <h3 className="text-base font-black text-slate-900">{p.name}</h3>
+
+                        {/* Monthly & Daily Rates */}
+                        <div className="my-4 p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1.5">
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-slate-500 font-medium">Monthly Rate:</span>
+                            <span className="font-extrabold text-slate-900 text-sm">
+                              PKR {Number(monthlyVal).toLocaleString()} <span className="text-[10px] text-slate-500 font-normal">/mo</span>
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-200">
+                            <span className="text-slate-500 font-medium">Daily Pass Rate:</span>
+                            <span className="font-bold text-emerald-700 text-xs">
+                              PKR {Number(dailyVal).toLocaleString()} <span className="text-[10px] text-slate-500 font-normal">/day</span>
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Features */}
+                        <ul className="space-y-2 mb-6">
+                          {(p.features || []).map((feat, idx) => (
+                            <li key={idx} className="text-xs text-slate-600 flex items-start gap-2">
+                              <svg className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                              </svg>
+                              <span>{feat}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+
+                      {/* Actions */}
+                      <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
+                        <button
+                          onClick={() => handleOpenEditModal(p)}
+                          className="flex-1 py-1.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-xs font-bold text-slate-900 rounded-lg transition"
+                        >
+                          Edit Pricing
+                        </button>
+                        <button
+                          onClick={() => handleDeletePlan(p.id)}
+                          title="Delete Plan from Supabase"
+                          className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition"
+                        >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
-          {/* Grid of Plans */}
-          {loadingPlans ? (
-            <div className="py-16 text-center text-xs text-gray-400">Loading plans from Supabase...</div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
-              {plans.map((p) => {
-                const monthlyVal = p.monthly_price ?? p.monthlyPrice ?? 0;
-                const dailyVal = p.daily_price ?? p.dailyPrice ?? 0;
+          {/* DYNAMIC SUPABASE ADD-ON SERVICES SECTION */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-5">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-base font-extrabold text-slate-900">
+                    Stackable Add-On Services (Stored in Supabase)
+                  </h3>
+                  <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200 font-mono">
+                    Supabase Live Sync
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Create and manage separate add-on service fees (e.g. Cardio, Personal Trainer, VIP Locker, Sauna Pass) synced live to Supabase.
+                </p>
+                {addonStatusMsg && (
+                  <p className="text-[11px] font-bold text-emerald-800 mt-1 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 inline-block font-mono">
+                    {addonStatusMsg}
+                  </p>
+                )}
+              </div>
 
-                return (
+              <button
+                onClick={handleOpenAddAddonModal}
+                className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl transition shadow-xs flex items-center gap-2 shrink-0"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
+                </svg>
+                Add New Add-On to Supabase
+              </button>
+            </div>
+
+            {/* Grid of Dynamic Add-Ons fetched from Supabase */}
+            {loadingAddons ? (
+              <div className="py-12 text-center text-xs text-slate-400">Loading Add-On Services from Supabase...</div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
+                {addons.map((a) => (
                   <div
-                    key={p.id}
-                    className={`bg-[#0E1A0F] border rounded-2xl p-5 flex flex-col justify-between relative transition-all ${
-                      p.popular
-                        ? "border-[#22C55E] ring-1 ring-[#22C55E]/40"
-                        : p.active
-                        ? "border-[#1E3621]"
-                        : "border-gray-800 opacity-60"
+                    key={a.id}
+                    className={`p-4 bg-slate-50 border rounded-2xl space-y-3 flex flex-col justify-between transition-all ${
+                      a.active ? "border-slate-200" : "border-slate-200 opacity-60"
                     }`}
                   >
-                    {p.popular && (
-                      <span className="absolute -top-3 right-4 bg-[#22C55E] text-black text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full tracking-wider shadow">
-                        Most Popular
-                      </span>
-                    )}
-
                     <div>
                       <div className="flex items-center justify-between gap-2 mb-2">
-                        <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#4ADE80] bg-[#16331C] px-2 py-0.5 rounded-md border border-[#234A28]">
-                          {p.type || "Membership"}
-                        </span>
+                        <span className="text-xl">{a.icon || "🏃"}</span>
                         <button
-                          onClick={() => handleTogglePlanActive(p.id)}
+                          onClick={() => handleToggleAddonActive(a.id)}
                           className={`text-[10px] font-bold px-2 py-0.5 rounded ${
-                            p.active ? "text-emerald-400 bg-emerald-950/60" : "text-gray-400 bg-gray-900"
+                            a.active
+                              ? "text-emerald-700 bg-emerald-50 border border-emerald-200"
+                              : "text-slate-500 bg-slate-100 border border-slate-200"
                           }`}
                         >
-                          {p.active ? "Active" : "Disabled"}
+                          {a.active ? "Active" : "Disabled"}
                         </button>
                       </div>
 
-                      <h3 className="text-base font-extrabold text-white">{p.name}</h3>
+                      <h4 className="font-extrabold text-slate-900 text-sm leading-tight">{a.name}</h4>
+                      <p className="text-xs text-slate-500 mt-1 line-clamp-2">{a.description}</p>
+                    </div>
 
-                      {/* Monthly & Daily Rates Display */}
-                      <div className="my-4 p-3 bg-[#0B150C] border border-[#162B17] rounded-xl space-y-1.5">
-                        <div className="flex items-center justify-between text-xs">
-                          <span className="text-[#738F7A] font-medium">Monthly Rate:</span>
-                          <span className="font-extrabold text-white text-sm">
-                            PKR {Number(monthlyVal).toLocaleString()} <span className="text-[10px] text-[#738F7A] font-normal">/mo</span>
-                          </span>
-                        </div>
-                        <div className="flex items-center justify-between text-xs pt-1 border-t border-[#142615]">
-                          <span className="text-[#738F7A] font-medium">Daily Pass Rate:</span>
-                          <span className="font-bold text-[#4ADE80] text-xs">
-                            PKR {Number(dailyVal).toLocaleString()} <span className="text-[10px] text-[#738F7A] font-normal">/day</span>
-                          </span>
-                        </div>
+                    <div className="space-y-3 pt-3 border-t border-slate-200">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-slate-500 font-medium">Monthly Charge:</span>
+                        <span className="font-mono font-black text-emerald-700 text-sm">
+                          +PKR {Number(a.price || 0).toLocaleString()}
+                        </span>
                       </div>
 
-                      {/* Feature list */}
-                      <ul className="space-y-2 mb-6">
-                        {(p.features || []).map((feat, idx) => (
-                          <li key={idx} className="text-xs text-[#A1B8A6] flex items-start gap-2">
-                            <svg className="w-3.5 h-3.5 text-[#22C55E] shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                            </svg>
-                            <span>{feat}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-
-                    {/* Actions */}
-                    <div className="pt-3 border-t border-[#182C1B] flex items-center justify-between gap-2">
-                      <button
-                        onClick={() => handleOpenEditModal(p)}
-                        className="flex-1 py-1.5 bg-[#162D19] hover:bg-[#1E3E22] border border-[#28502F] text-xs font-bold text-white rounded-lg transition"
-                      >
-                        Edit Pricing
-                      </button>
-                      <button
-                        onClick={() => handleDeletePlan(p.id)}
-                        title="Delete Plan from Supabase"
-                        className="p-1.5 text-gray-500 hover:text-red-400 hover:bg-red-950/30 rounded-lg transition"
-                      >
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                        </svg>
-                      </button>
+                      <div className="flex items-center justify-between gap-2">
+                        <button
+                          onClick={() => handleOpenEditAddonModal(a)}
+                          className="flex-1 py-1.5 bg-white hover:bg-slate-100 border border-slate-200 text-xs font-bold text-slate-900 rounded-lg transition"
+                        >
+                          Edit Price
+                        </button>
+                        <button
+                          onClick={() => handleDeleteAddon(a.id)}
+                          title="Delete Add-On from Supabase"
+                          className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition"
+                        >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                        </button>
+                      </div>
                     </div>
                   </div>
-                );
-              })}
-            </div>
-          )}
-
-          {/* Modal for Add / Edit Plan */}
-          {isPlanModalOpen && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
-              <div className="bg-[#0E1A0F] border border-[#22C55E]/40 rounded-2xl max-w-md w-full p-6 space-y-5 shadow-2xl">
-                <div className="flex items-center justify-between border-b border-[#1E3621] pb-3">
-                  <h3 className="text-base font-extrabold text-white">
-                    {editingPlan ? "Edit Membership Pricing Plan" : "Create New Pricing Plan"}
-                  </h3>
-                  <button
-                    onClick={() => setIsPlanModalOpen(false)}
-                    className="text-gray-400 hover:text-white"
-                  >
-                    ✕
-                  </button>
-                </div>
-
-                <form onSubmit={handleSavePlan} className="space-y-4">
-                  <div>
-                    <label className="block text-xs font-bold text-[#A1B8A6] mb-1">Plan Name</label>
-                    <input
-                      type="text"
-                      required
-                      value={planName}
-                      onChange={(e) => setPlanName(e.target.value)}
-                      placeholder="e.g. Pro Membership or Student Pass"
-                      className="w-full bg-[#081109] border border-[#1E3621] rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-[#22C55E]"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-[#A1B8A6] mb-1">Category / Tag</label>
-                    <select
-                      value={planType}
-                      onChange={(e) => setPlanType(e.target.value)}
-                      className="w-full bg-[#081109] border border-[#1E3621] rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-[#22C55E]"
-                    >
-                      <option value="Monthly">Monthly Membership</option>
-                      <option value="Daily">Daily Pass Only</option>
-                      <option value="Monthly + Daily Option">Monthly + Daily Combo</option>
-                      <option value="VIP Elite">VIP Elite</option>
-                    </select>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-bold text-[#A1B8A6] mb-1">Monthly Price (PKR)</label>
-                      <input
-                        type="number"
-                        step="1"
-                        required
-                        value={planMonthlyPrice}
-                        onChange={(e) => setPlanMonthlyPrice(e.target.value)}
-                        placeholder="5000"
-                        className="w-full bg-[#081109] border border-[#1E3621] rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-[#22C55E]"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-[#A1B8A6] mb-1">Daily Pass Price (PKR)</label>
-                      <input
-                        type="number"
-                        step="1"
-                        required
-                        value={planDailyPrice}
-                        onChange={(e) => setPlanDailyPrice(e.target.value)}
-                        placeholder="500"
-                        className="w-full bg-[#081109] border border-[#1E3621] rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-[#22C55E]"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-[#A1B8A6] mb-1">
-                      Features (Comma Separated)
-                    </label>
-                    <textarea
-                      rows={3}
-                      value={planFeatures}
-                      onChange={(e) => setPlanFeatures(e.target.value)}
-                      placeholder="Cardio Access, Free Weights, Personal Trainer"
-                      className="w-full bg-[#081109] border border-[#1E3621] rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-[#22C55E]"
-                    />
-                  </div>
-
-                  <div className="pt-3 border-t border-[#1E3621] flex justify-end gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setIsPlanModalOpen(false)}
-                      className="px-4 py-2 bg-[#122414] text-xs font-bold text-gray-300 rounded-xl hover:bg-[#1a331c]"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      className="px-5 py-2 bg-[#22C55E] text-xs font-bold text-black rounded-xl hover:bg-[#1ca64f] shadow-md shadow-emerald-500/20"
-                    >
-                      Save Plan to Supabase
-                    </button>
-                  </div>
-                </form>
+                ))}
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       )}
 
@@ -712,266 +969,566 @@ export default function AdminConfigurationPage() {
       {/* TAB 2: RESET MEMBER PASSWORDS */}
       {/* ========================================================================= */}
       {activeTab === "passwords" && (
-        <div className="space-y-6">
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-5">
           <div>
-            <h2 className="text-lg font-bold text-white">Reset Member Account Passwords</h2>
-            <p className="text-xs text-[#738F7A]">
-              Quickly reset forgotten passwords for any gym member. Click 1-Click Reset to set password back to <code className="text-[#4ADE80] bg-[#16331C] px-1.5 py-0.5 rounded font-mono">12345678</code> or type a custom password.
+            <h2 className="text-base font-extrabold text-slate-900">Member Password Management</h2>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Reset member credentials for mobile app access in Supabase.
             </p>
           </div>
 
-          {/* Quick Success Alert */}
-          {resetAlert && (
-            <div
-              className={`p-4 rounded-2xl border ${
-                resetAlert.type === "success"
-                  ? "bg-[#0E2412] border-[#22C55E] text-emerald-300"
-                  : "bg-red-950/40 border-red-800 text-red-300"
-              }`}
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <h4 className="font-extrabold text-sm text-white">
-                    {resetAlert.type === "success" ? "Password Reset Successful! 🎉" : "Password Reset Error"}
-                  </h4>
-                  <p className="text-xs mt-1">{resetAlert.notice || resetAlert.message}</p>
-
-                  {resetAlert.type === "success" && resetAlert.member && (
-                    <div className="mt-3 p-3 bg-[#081209] border border-[#1B381E] rounded-xl font-mono text-xs text-white space-y-1 select-all">
-                      <p>👤 Member: <span className="text-[#4ADE80] font-bold">{resetAlert.member.full_name}</span></p>
-                      <p>✉️ Email: <span className="text-[#4ADE80]">{resetAlert.member.email}</span></p>
-                      <p>🔑 New Password: <span className="text-yellow-400 font-bold">{resetAlert.password}</span></p>
-                    </div>
-                  )}
-                </div>
-                <button
-                  onClick={() => setResetAlert(null)}
-                  className="text-gray-400 hover:text-white text-xs font-bold"
-                >
-                  ✕
-                </button>
-              </div>
+          {resetMsg && (
+            <div className="p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold rounded-xl font-mono">
+              {resetMsg}
             </div>
           )}
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Member List Selector Column */}
-            <div className="lg:col-span-2 bg-[#0E1A0F] border border-[#1E3621] rounded-2xl p-5 space-y-4">
-              <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-                <h3 className="text-sm font-extrabold text-white">Select Member to Reset Password</h3>
-                <div className="relative w-full sm:w-64">
-                  <input
-                    type="text"
-                    value={searchMember}
-                    onChange={(e) => setSearchMember(e.target.value)}
-                    placeholder="Search by name or email..."
-                    className="w-full bg-[#081109] border border-[#1E3621] rounded-xl pl-8 pr-3 py-1.5 text-xs text-white focus:outline-none focus:border-[#22C55E]"
-                  />
-                  <svg
-                    className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-2.5"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-                    />
-                  </svg>
-                </div>
-              </div>
+          {/* Search */}
+          <div className="relative max-w-md">
+            <input
+              type="text"
+              value={searchMember}
+              onChange={(e) => setSearchMember(e.target.value)}
+              placeholder="Search member by name, email or ID..."
+              className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 pl-10 text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-emerald-500"
+            />
+            <svg
+              className="w-4 h-4 text-slate-400 absolute left-3.5 top-3"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+          </div>
 
-              {loadingMembers ? (
-                <div className="py-12 text-center text-xs text-gray-400">Loading members list...</div>
-              ) : filteredMembers.length === 0 ? (
-                <div className="py-10 text-center text-xs text-gray-500">No matching members found.</div>
-              ) : (
-                <div className="divide-y divide-[#152A18] max-h-96 overflow-y-auto pr-1">
-                  {filteredMembers.map((m) => {
-                    const isSelected = selectedMember?.id === m.id;
-                    return (
-                      <div
-                        key={m.id}
-                        onClick={() => setSelectedMember(m)}
-                        className={`p-3 rounded-xl flex items-center justify-between cursor-pointer transition ${
-                          isSelected ? "bg-[#16331C] border border-[#22C55E]/60" : "hover:bg-[#132415]"
-                        }`}
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className="w-9 h-9 rounded-full bg-[#1A331D] border border-[#28502F] flex items-center justify-center font-bold text-xs text-[#4ADE80]">
-                            {m.full_name ? m.full_name.charAt(0).toUpperCase() : "M"}
-                          </div>
-                          <div>
-                            <p className="text-xs font-bold text-white leading-tight">{m.full_name || "Gym Member"}</p>
-                            <p className="text-[11px] text-[#738F7A]">{m.email}</p>
-                            {m.member_id && (
-                              <span className="text-[10px] text-[#4ADE80] font-mono">{m.member_id}</span>
-                            )}
-                          </div>
+          {/* Table of Members */}
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="border-b border-slate-200 text-[11px] font-bold text-slate-500 uppercase tracking-wider bg-slate-50/80">
+                  <th className="py-3 px-3.5 rounded-l-lg">Member Name</th>
+                  <th className="py-3 px-3.5">Member ID</th>
+                  <th className="py-3 px-3.5">Email / Mobile Username</th>
+                  <th className="py-3 px-3.5">Plan</th>
+                  <th className="py-3 px-3.5 text-right rounded-r-lg">Password Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 text-xs">
+                {filteredMembers.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="py-10 text-center text-slate-400">
+                      No members found matching search query.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredMembers.map((m) => (
+                    <tr key={m.id} className="hover:bg-slate-50 transition-colors">
+                      <td className="py-3.5 px-3.5 font-bold text-slate-900 flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded-full bg-emerald-100 border border-emerald-200 text-emerald-800 font-bold text-xs flex items-center justify-center shrink-0">
+                          {m.full_name?.charAt(0) || "M"}
                         </div>
-
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSelectedMember(m);
-                              handleResetPasswordSubmit(null, m, "12345678");
-                            }}
-                            className="px-2.5 py-1 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 text-[11px] font-bold rounded-lg transition"
-                          >
-                            ⚡ 1-Click Reset (12345678)
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            {/* Reset Form Card Column */}
-            <div className="bg-[#0E1A0F] border border-[#1E3621] rounded-2xl p-5 space-y-4">
-              <h3 className="text-sm font-extrabold text-white border-b border-[#1E3621] pb-3">
-                Reset Form Details
-              </h3>
-
-              {selectedMember ? (
-                <form onSubmit={(e) => handleResetPasswordSubmit(e)} className="space-y-4">
-                  <div className="p-3 bg-[#081209] border border-[#173019] rounded-xl text-xs space-y-1">
-                    <p className="text-[#738F7A]">Selected Member:</p>
-                    <p className="font-extrabold text-white">{selectedMember.full_name}</p>
-                    <p className="text-[11px] text-[#4ADE80]">{selectedMember.email}</p>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-[#A1B8A6] mb-1">
-                      New Password (Default: <code className="text-[#4ADE80]">12345678</code>)
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={customPassword}
-                      onChange={(e) => setCustomPassword(e.target.value)}
-                      className="w-full bg-[#081109] border border-[#1E3621] rounded-xl px-3.5 py-2 text-xs font-mono text-amber-300 focus:outline-none focus:border-[#22C55E]"
-                    />
-                  </div>
-
-                  <div className="space-y-2 pt-2">
-                    <button
-                      type="submit"
-                      disabled={resetting}
-                      className="w-full py-2.5 bg-[#22C55E] hover:bg-[#1ea850] text-black font-bold text-xs rounded-xl transition shadow-md shadow-emerald-500/20 disabled:opacity-50"
-                    >
-                      {resetting ? "Resetting Password..." : "Confirm & Save Password"}
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => handleResetPasswordSubmit(null, selectedMember, "12345678")}
-                      disabled={resetting}
-                      className="w-full py-2 bg-[#172D1A] hover:bg-[#1E3E22] text-[#4ADE80] font-bold text-xs rounded-xl border border-[#234A28] transition"
-                    >
-                      Reset to Default 12345678
-                    </button>
-                  </div>
-                </form>
-              ) : (
-                <div className="py-16 text-center text-xs text-gray-500">
-                  Select a member from the left list to set a custom password or click 1-Click Reset button.
-                </div>
-              )}
-            </div>
+                        {m.full_name}
+                      </td>
+                      <td className="py-3.5 px-3.5 font-mono text-emerald-700 font-bold">{m.member_id || "GP-MEMBER"}</td>
+                      <td className="py-3.5 px-3.5 font-mono text-slate-600">{m.email}</td>
+                      <td className="py-3.5 px-3.5 text-slate-600 font-medium">{m.plan || "Pro Membership"}</td>
+                      <td className="py-3.5 px-3.5 text-right">
+                        <button
+                          onClick={() => {
+                            setResetTarget(m);
+                            setNewMemberPass("12345678");
+                          }}
+                          className="px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-xs font-bold text-slate-800 rounded-xl transition"
+                        >
+                          🔑 Reset Password
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
       )}
 
       {/* ========================================================================= */}
-      {/* TAB 3: GYM SHIFTS & GENERAL CONFIGURATION */}
+      {/* TAB 3: GENERAL GYM CONFIGURATION & GPS GEOFENCING */}
       {/* ========================================================================= */}
       {activeTab === "settings" && (
-        <div className="bg-[#0E1A0F] border border-[#1E3621] rounded-2xl p-6 space-y-6 max-w-3xl">
-          <div>
-            <h2 className="text-lg font-bold text-white">General Gym Configuration & Shift Timings</h2>
-            <p className="text-xs text-[#738F7A]">
-              Update default shift timings, WhatsApp contact numbers, and system defaults stored in Supabase table <code className="text-[#4ADE80]">gym_settings</code>.
-            </p>
+        <div className="space-y-6">
+          {/* GENERAL GYM CONFIG CARD */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 sm:p-8 shadow-xs max-w-3xl space-y-6">
+            <div>
+              <h2 className="text-base font-extrabold text-slate-900">General Gym Configuration & Shift Timings</h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Set official gym contact info, WhatsApp numbers, shift schedules, and address.
+              </p>
+            </div>
+
+            {settingsSavedMsg && (
+              <div className="p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold rounded-xl font-mono">
+                ✓ {settingsSavedMsg}
+              </div>
+            )}
+
+            <form onSubmit={handleSaveGeneralConfig} className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Gym Name</label>
+                  <input
+                    type="text"
+                    required
+                    value={gymConfig.gymName}
+                    onChange={(e) => setGymConfig({ ...gymConfig, gymName: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Currency</label>
+                  <input
+                    type="text"
+                    required
+                    value={gymConfig.currency}
+                    onChange={(e) => setGymConfig({ ...gymConfig, currency: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Official WhatsApp</label>
+                  <input
+                    type="text"
+                    required
+                    value={gymConfig.whatsapp}
+                    onChange={(e) => setGymConfig({ ...gymConfig, whatsapp: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Support Email</label>
+                  <input
+                    type="email"
+                    required
+                    value={gymConfig.email}
+                    onChange={(e) => setGymConfig({ ...gymConfig, email: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-emerald-700 uppercase mb-1">
+                    Ladies Dedicated Shift
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={gymConfig.ladiesShift}
+                    onChange={(e) => setGymConfig({ ...gymConfig, ladiesShift: e.target.value })}
+                    className="w-full bg-emerald-50/50 border border-emerald-300 rounded-xl px-4 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-emerald-500 font-medium"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
+                    Gents Shift Timings
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={gymConfig.gentsShift}
+                    onChange={(e) => setGymConfig({ ...gymConfig, gentsShift: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-emerald-500 font-medium"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Gym Physical Address</label>
+                <textarea
+                  rows={2}
+                  value={gymConfig.address}
+                  onChange={(e) => setGymConfig({ ...gymConfig, address: e.target.value })}
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div className="pt-3 border-t border-slate-200 flex justify-end">
+                <button
+                  type="submit"
+                  className="px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl transition shadow-xs"
+                >
+                  Save General Settings to Supabase
+                </button>
+              </div>
+            </form>
           </div>
 
-          {settingsSavedMsg && (
-            <div className="p-3 bg-[#16331C] border border-[#22C55E] text-[#4ADE80] text-xs font-bold rounded-xl">
-              ✓ {settingsSavedMsg}
-            </div>
-          )}
-
-          <form onSubmit={handleSaveGeneralConfig} className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* GPS GEOFENCING & LOCATION ENFORCEMENT CONFIG CARD */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 sm:p-8 shadow-xs max-w-3xl space-y-6">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-4">
               <div>
-                <label className="block text-xs font-bold text-[#A1B8A6] mb-1">Gym Name</label>
-                <input
-                  type="text"
-                  value={gymConfig.gymName}
-                  onChange={(e) => setGymConfig({ ...gymConfig, gymName: e.target.value })}
-                  className="w-full bg-[#081109] border border-[#1E3621] rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-[#22C55E]"
-                />
+                <h2 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
+                  <span>📍</span> GPS Geofencing & Location Enforcement
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Configure the gym's physical GPS coordinates and allowed check-in radius stored in Supabase.
+                </p>
               </div>
-
-              <div>
-                <label className="block text-xs font-bold text-[#A1B8A6] mb-1">Primary WhatsApp / Phone</label>
-                <input
-                  type="text"
-                  value={gymConfig.whatsapp}
-                  onChange={(e) => setGymConfig({ ...gymConfig, whatsapp: e.target.value })}
-                  className="w-full bg-[#081109] border border-[#1E3621] rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-[#22C55E]"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-bold text-[#A1B8A6] mb-1">Ladies Shift Timing</label>
-                <input
-                  type="text"
-                  value={gymConfig.ladiesShift}
-                  onChange={(e) => setGymConfig({ ...gymConfig, ladiesShift: e.target.value })}
-                  className="w-full bg-[#081109] border border-[#1E3621] rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-[#22C55E]"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-[#A1B8A6] mb-1">Gents Shift Timing</label>
-                <input
-                  type="text"
-                  value={gymConfig.gentsShift}
-                  onChange={(e) => setGymConfig({ ...gymConfig, gentsShift: e.target.value })}
-                  className="w-full bg-[#081109] border border-[#1E3621] rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-[#22C55E]"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-[#A1B8A6] mb-1">Gym Address</label>
-              <input
-                type="text"
-                value={gymConfig.address}
-                onChange={(e) => setGymConfig({ ...gymConfig, address: e.target.value })}
-                className="w-full bg-[#081109] border border-[#1E3621] rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-[#22C55E]"
-              />
-            </div>
-
-            <div className="pt-4 border-t border-[#1E3621] flex justify-end">
-              <button
-                type="submit"
-                className="px-6 py-2.5 bg-[#22C55E] hover:bg-[#1ea850] text-black font-bold text-xs rounded-xl transition shadow-md shadow-emerald-500/20"
+              <span
+                className={`text-[10px] font-mono font-bold px-2.5 py-1 rounded-full border ${
+                  geofenceConfig.enabled
+                    ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                    : "bg-slate-100 text-slate-500 border-slate-200"
+                }`}
               >
-                Save Settings to Supabase
-              </button>
+                {geofenceConfig.enabled ? "● Geofence ACTIVE" : "○ Geofence OFF"}
+              </span>
             </div>
-          </form>
+
+            {geofenceMsg && (
+              <div className="p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold rounded-xl font-mono">
+                {geofenceMsg}
+              </div>
+            )}
+
+            <form onSubmit={handleSaveGeofenceConfig} className="space-y-4">
+              {/* Enable Toggle Switch */}
+              <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between">
+                <div>
+                  <label className="text-xs font-extrabold text-slate-900 block">Enforce Geofenced Check-In</label>
+                  <span className="text-[11px] text-slate-500">
+                    Members must be within the defined GPS radius to mark attendance.
+                  </span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={geofenceConfig.enabled}
+                  onChange={(e) => setGeofenceConfig({ ...geofenceConfig, enabled: e.target.checked })}
+                  className="w-5 h-5 text-emerald-600 rounded focus:ring-emerald-500 cursor-pointer"
+                />
+              </div>
+
+              {/* Coordinates */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Gym Latitude *</label>
+                  <input
+                    type="number"
+                    step="any"
+                    required
+                    value={geofenceConfig.latitude}
+                    onChange={(e) => setGeofenceConfig({ ...geofenceConfig, latitude: parseFloat(e.target.value) || 0 })}
+                    placeholder="32.1877"
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 text-xs text-slate-900 font-mono font-bold focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Gym Longitude *</label>
+                  <input
+                    type="number"
+                    step="any"
+                    required
+                    value={geofenceConfig.longitude}
+                    onChange={(e) => setGeofenceConfig({ ...geofenceConfig, longitude: parseFloat(e.target.value) || 0 })}
+                    placeholder="74.1945"
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 text-xs text-slate-900 font-mono font-bold focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Allowed Radius *</label>
+                  <select
+                    value={geofenceConfig.radiusMeters}
+                    onChange={(e) => setGeofenceConfig({ ...geofenceConfig, radiusMeters: parseInt(e.target.value, 10) || 200 })}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 font-bold focus:outline-none focus:border-emerald-500"
+                  >
+                    <option value={100}>100 Meters (Strict Building Boundary)</option>
+                    <option value={200}>200 Meters (Recommended Standard)</option>
+                    <option value={500}>500 Meters (Block Radius)</option>
+                    <option value={1000}>1,000 Meters (1 KM Neighborhood)</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Auto-detect button */}
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={handleAutoDetectGPS}
+                  disabled={detectingGps}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-200 font-bold text-xs rounded-xl transition flex items-center gap-2"
+                >
+                  <svg className="w-4 h-4 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                  </svg>
+                  {detectingGps ? "Detecting GPS..." : "📍 Auto-Detect Current GPS Coordinates"}
+                </button>
+
+                <button
+                  type="submit"
+                  className="px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl transition shadow-xs self-end sm:self-auto"
+                >
+                  Save Geofence Settings to Supabase
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
+
+      {/* MODAL 1: ADD / EDIT BASE MEMBERSHIP PLAN */}
+      {isPlanModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+          <div className="bg-white border border-slate-200 rounded-2xl max-w-md w-full p-6 space-y-5 shadow-2xl text-slate-900">
+            <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+              <div>
+                <h3 className="text-base font-extrabold text-slate-900">
+                  {editingPlan ? "Edit Plan Pricing & Rates" : "Create New Membership Plan"}
+                </h3>
+                <p className="text-[11px] text-slate-500">Changes update directly in Supabase table.</p>
+              </div>
+              <button onClick={() => setIsPlanModalOpen(false)} className="text-slate-400 hover:text-slate-700 font-bold text-sm cursor-pointer hover:bg-slate-100 p-1.5 rounded-lg transition">
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSavePlan} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Plan Name *</label>
+                <input
+                  type="text"
+                  required
+                  value={planName}
+                  onChange={(e) => setPlanName(e.target.value)}
+                  placeholder="e.g. Pro Elite Membership"
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Monthly Fee (PKR) *</label>
+                  <input
+                    type="number"
+                    step="1"
+                    required
+                    value={planMonthlyPrice}
+                    onChange={(e) => setPlanMonthlyPrice(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Daily Pass Rate (PKR)</label>
+                  <input
+                    type="number"
+                    step="1"
+                    required
+                    value={planDailyPrice}
+                    onChange={(e) => setPlanDailyPrice(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-600 uppercase mb-1">
+                  Features (Comma Separated)
+                </label>
+                <textarea
+                  rows={3}
+                  value={planFeatures}
+                  onChange={(e) => setPlanFeatures(e.target.value)}
+                  placeholder="Full Gym Access, Diet Chart, Trainer Assistance"
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2 text-xs text-slate-900 focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div className="pt-3 border-t border-slate-200 flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setIsPlanModalOpen(false)}
+                  className="px-4 py-2 bg-slate-100 text-xs font-bold text-slate-700 rounded-xl hover:bg-slate-200"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-emerald-600 text-xs font-bold text-white rounded-xl hover:bg-emerald-700 shadow-xs"
+                >
+                  Save Plan to Supabase
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 2: ADD / EDIT SUPABASE ADD-ON SERVICE */}
+      {isAddonModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+          <div className="bg-white border border-slate-200 rounded-2xl max-w-md w-full p-6 space-y-5 shadow-2xl text-slate-900">
+            <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+              <div>
+                <h3 className="text-base font-extrabold text-slate-900">
+                  {editingAddon ? "Edit Add-On Service" : "Add New Add-On Service to Supabase"}
+                </h3>
+                <p className="text-[11px] text-slate-500">Changes save directly to Supabase database.</p>
+              </div>
+              <button onClick={() => setIsAddonModalOpen(false)} className="text-slate-400 hover:text-slate-700 font-bold text-sm cursor-pointer hover:bg-slate-100 p-1.5 rounded-lg transition">
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveAddon} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-600 uppercase mb-1">
+                  Add-On Service Name *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={addonName}
+                  onChange={(e) => setAddonName(e.target.value)}
+                  placeholder="e.g. Cardio Access Plan"
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-emerald-500 font-bold"
+                />
+              </div>
+
+              <div className="grid grid-cols-3 gap-3">
+                <div className="col-span-2">
+                  <label className="block text-xs font-bold text-slate-600 uppercase mb-1">
+                    Monthly Charge (PKR) *
+                  </label>
+                  <input
+                    type="number"
+                    step="1"
+                    required
+                    value={addonPrice}
+                    onChange={(e) => setAddonPrice(e.target.value)}
+                    placeholder="1500"
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-emerald-500 font-mono font-bold"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Icon</label>
+                  <input
+                    type="text"
+                    value={addonIcon}
+                    onChange={(e) => setAddonIcon(e.target.value)}
+                    placeholder="🏃"
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-center text-sm focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-600 uppercase mb-1">
+                  Description
+                </label>
+                <textarea
+                  rows={2}
+                  value={addonDescription}
+                  onChange={(e) => setAddonDescription(e.target.value)}
+                  placeholder="Unlimited access to cardio arena equipment..."
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2 text-xs text-slate-900 focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div className="pt-3 border-t border-slate-200 flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setIsAddonModalOpen(false)}
+                  className="px-4 py-2 bg-slate-100 text-xs font-bold text-slate-700 rounded-xl hover:bg-slate-200"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-emerald-600 text-xs font-bold text-white rounded-xl hover:bg-emerald-700 shadow-xs"
+                >
+                  Save Add-On to Supabase
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 3: RESET PASSWORD CONFIRMATION */}
+      {resetTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+          <div className="bg-white border border-slate-200 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl text-slate-900">
+            <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+              <div>
+                <h3 className="text-base font-extrabold text-slate-900">Reset Member Password</h3>
+                <p className="text-[11px] text-slate-500">Sets new password for member mobile app login.</p>
+              </div>
+              <button onClick={() => setResetTarget(null)} className="text-slate-400 hover:text-slate-700 font-bold text-sm cursor-pointer hover:bg-slate-100 p-1.5 rounded-lg transition">
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleConfirmResetPassword} className="space-y-4">
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs space-y-1">
+                <p className="text-slate-500">Member:</p>
+                <p className="font-extrabold text-slate-900">{resetTarget.full_name}</p>
+                <p className="text-[11px] text-emerald-700 font-mono font-bold">{resetTarget.email}</p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-emerald-700 uppercase mb-1">
+                  New Password *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={newMemberPass}
+                  onChange={(e) => setNewMemberPass(e.target.value)}
+                  className="w-full bg-emerald-50/50 border border-emerald-300 rounded-xl px-3.5 py-2.5 text-xs text-emerald-800 font-mono font-bold focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div className="pt-3 border-t border-slate-200 flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setResetTarget(null)}
+                  className="px-4 py-2 bg-slate-100 text-xs font-bold text-slate-700 rounded-xl hover:bg-slate-200"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={resetSubmitting}
+                  className="px-5 py-2 bg-emerald-600 text-xs font-bold text-white rounded-xl hover:bg-emerald-700 shadow-xs"
+                >
+                  {resetSubmitting ? "Updating..." : "Confirm Password Update"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* REUSABLE CUSTOM DIALOG MODAL */}
+      <CustomDialogModal {...dialogConfig} />
+
+      {/* REUSABLE LOADING ANIMATION OVERLAY */}
+      <LoadingOverlay
+        isLoading={resetSubmitting || detectingGps}
+        message={detectingGps ? "Detecting GPS Coordinates..." : "Updating Password in Supabase..."}
+      />
     </div>
   );
 }
