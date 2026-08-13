@@ -39,7 +39,7 @@ function ProfessionalSvgChart({ data, valueKey = "amount", colorScheme = "emeral
 
   const strokeColor = colorScheme === "emerald" ? "#059669" : "#d97706";
   const gradientStart = colorScheme === "emerald" ? "#10b981" : "#f59e0b";
-  const gradientId = `revenueChartGrad_${colorScheme}_${Math.random().toString(36).substr(2, 4)}`;
+  const gradientId = `revenueChartGrad_${colorScheme}`;
 
   const selectedPt = hoveredIdx !== null ? points[hoveredIdx] : null;
   const isNearTop = selectedPt ? selectedPt.y < height * 0.45 : false;
@@ -478,29 +478,36 @@ export default function RevenueAdminPage() {
 
   return (
     <div className="space-y-8 max-w-7xl mx-auto font-sans">
-      {/* Top Banner */}
-      <div className="bg-gradient-to-r from-emerald-800 via-emerald-700 to-teal-800 border border-emerald-600/30 rounded-2xl p-6 sm:p-7 shadow-md text-white flex flex-col md:flex-row items-start md:items-center justify-between gap-5">
-        <div>
+      {/* HEADER BANNER */}
+      <div className="relative overflow-hidden bg-gradient-to-r from-slate-900 via-slate-800 to-emerald-950 rounded-3xl p-6 sm:p-8 shadow-md border border-slate-800 text-white flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+        <div className="space-y-1.5 z-10">
           <div className="flex items-center gap-2">
-            <span className="px-2.5 py-1 rounded-md bg-emerald-900/60 border border-emerald-500/30 text-[10px] font-bold text-emerald-200 uppercase tracking-wider">
+            <span className="bg-emerald-500/20 text-emerald-300 text-[11px] font-bold px-2.5 py-0.5 rounded-full border border-emerald-500/30 backdrop-blur-md">
               Financial Intelligence
             </span>
-            <span className="text-[11px] text-emerald-200 font-mono font-semibold">Real-Time Supabase Sync</span>
+            <span className="text-slate-400 text-xs">• Revenue Analytics & Ledger</span>
           </div>
-          <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight mt-2">
-            Revenue Analytics & Financial Ledger
+          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
+            Revenue & Financial Overview 📈
           </h1>
-          <p className="text-xs sm:text-sm text-emerald-100/90 mt-1 max-w-2xl">
-            Detailed breakdown of monthly subscriptions, walk-in revenues, payment methods, and financial charts with period filters.
+          <p className="text-xs sm:text-sm text-slate-300 max-w-xl">
+            Detailed breakdown of monthly subscriptions, walk-in revenues, payment methods, and financial growth charts.
           </p>
         </div>
 
-        <div className="flex items-center gap-3 shrink-0">
+        {/* Quick Action Navigation */}
+        <div className="flex flex-wrap gap-2.5 z-10 shrink-0">
           <Link
             href="/admin/payments"
-            className="bg-white hover:bg-emerald-50 text-emerald-900 font-extrabold text-xs px-5 py-3 rounded-xl transition shadow-xs flex items-center gap-1.5 cursor-pointer"
+            className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs px-4 py-2.5 rounded-xl transition-all duration-150 shadow-sm flex items-center gap-1.5 hover:scale-[1.02]"
           >
-            Payments & Invoices Portal →
+            <span>💳</span> Payments & Invoices
+          </Link>
+          <Link
+            href="/admin/members"
+            className="bg-slate-800/80 hover:bg-slate-800 border border-slate-700 text-slate-200 font-semibold text-xs px-4 py-2.5 rounded-xl transition-all duration-150 flex items-center gap-1.5"
+          >
+            <span>👥</span> Members Directory
           </Link>
         </div>
       </div>

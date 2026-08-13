@@ -8,7 +8,8 @@ const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 export async function POST(request) {
   try {
     const body = await request.json();
-    const { email, password, full_name, plan, fee_paid } = body;
+    const { email, password, full_name, gender, plan, fee_paid } = body;
+    const memberGender = gender && ["Male", "Female", "Other"].includes(gender) ? gender : "Male";
 
     if (!email || !password || !full_name) {
       return NextResponse.json(
@@ -31,7 +32,7 @@ export async function POST(request) {
         email: cleanEmail,
         password: password,
         email_confirm: true,
-        user_metadata: { full_name, role: "member" },
+        user_metadata: { full_name, gender: memberGender, role: "member" },
       });
 
       if (adminUserError) {
@@ -49,7 +50,7 @@ export async function POST(request) {
         email: cleanEmail,
         password: password,
         options: {
-          data: { full_name, role: "member" },
+          data: { full_name, gender: memberGender, role: "member" },
         },
       });
 
@@ -80,6 +81,7 @@ export async function POST(request) {
       id: userId,
       email: cleanEmail,
       full_name: full_name,
+      gender: memberGender,
       member_id: generatedMemberId,
       plan: plan ? plan.split(" (")[0] : "Pro Membership",
       days_remaining: 30,

@@ -1,35 +1,40 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 import { supabase, isSupabaseConfigured } from "../../lib/supabaseClient";
 
-// Reusable Professional SVG Area & Line Chart Component
-function ProfessionalSvgChart({ data, valueKey = "count", colorScheme = "emerald", formatTooltip }) {
+// ============================================================================
+// 1. REUSABLE PROFESSIONAL SVG AREA & LINE CHART
+// ============================================================================
+function ProfessionalSvgChart({
+  data,
+  valueKey = "count",
+  colorScheme = "emerald",
+  formatTooltip,
+}) {
   const [hoveredIdx, setHoveredIdx] = useState(null);
 
   if (!data || data.length === 0) return null;
 
   const width = 600;
-  const height = 190;
-  const paddingX = 42;
-  const paddingTop = 35;
-  const paddingBottom = 30;
+  const height = 180;
+  const paddingX = 40;
+  const paddingTop = 32;
+  const paddingBottom = 32;
 
   const values = data.map((d) => Number(d[valueKey]) || 0);
   const rawMaxVal = Math.max(...values, 10);
-  // Add 18% headroom scale so top points never touch chart top ceiling
-  const maxVal = rawMaxVal * 1.18;
+  const maxVal = rawMaxVal * 1.18; // 18% headroom
 
-  // Compute normalized points
   const points = data.map((d, i) => {
     const x = paddingX + (i / Math.max(1, data.length - 1)) * (width - paddingX * 2);
     const val = Number(d[valueKey]) || 0;
     const y = height - paddingBottom - (val / maxVal) * (height - paddingTop - paddingBottom);
-    return { x, y, label: d.label, value: val, raw: d };
+    return { x, y, label: d.label, value: val };
   });
 
-  // Calculate smooth cubic bezier path
+  // Calculate Smooth Cubic Bezier Curve Path
   let pathD = `M ${points[0].x} ${points[0].y}`;
   for (let i = 0; i < points.length - 1; i++) {
     const p0 = points[i];
@@ -40,41 +45,33 @@ function ProfessionalSvgChart({ data, valueKey = "count", colorScheme = "emerald
 
   const areaD = `${pathD} L ${points[points.length - 1].x} ${height - paddingBottom} L ${points[0].x} ${height - paddingBottom} Z`;
 
-  const strokeColor = colorScheme === "emerald" ? "#059669" : "#d97706";
-  const gradientStart = colorScheme === "emerald" ? "#10b981" : "#f59e0b";
-  const gradientId = `chartGrad_${colorScheme}_${Math.random().toString(36).substr(2, 4)}`;
+  const isEmerald = colorScheme === "emerald";
+  const strokeColor = isEmerald ? "#059669" : "#d97706";
+  const gradientStart = isEmerald ? "#10b981" : "#f59e0b";
+  const gradientId = `chartGrad_${colorScheme}`;
 
   const selectedPt = hoveredIdx !== null ? points[hoveredIdx] : null;
-  const isNearTop = selectedPt ? selectedPt.y < height * 0.42 : false;
-  const isNearRight = selectedPt ? selectedPt.x > width * 0.75 : false;
-  const isNearLeft = selectedPt ? selectedPt.x < width * 0.25 : false;
-
-  let transformX = "-translate-x-1/2";
-  if (isNearRight) transformX = "-translate-x-[88%]";
-  if (isNearLeft) transformX = "-translate-x-[12%]";
-
-  let transformY = isNearTop ? "translate-y-3" : "-translate-y-full -mt-2.5";
 
   return (
-    <div className="relative w-full overflow-hidden bg-slate-50/80 rounded-xl border border-slate-200/90 p-4 mt-2">
+    <div className="relative w-full bg-slate-50/50 rounded-xl border border-slate-200/60 p-4 transition-all duration-300">
       <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-44 overflow-visible">
         <defs>
           <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={gradientStart} stopOpacity="0.32" />
+            <stop offset="0%" stopColor={gradientStart} stopOpacity="0.25" />
             <stop offset="100%" stopColor={gradientStart} stopOpacity="0.0" />
           </linearGradient>
         </defs>
 
-        {/* Horizontal Reference Grid lines */}
-        {[0, 0.25, 0.5, 0.75, 1].map((ratio, idx) => {
+        {/* Reference Grid Lines & Y-Axis Labels */}
+        {[0, 0.33, 0.66, 1].map((ratio, idx) => {
           const y = height - paddingBottom - ratio * (height - paddingTop - paddingBottom);
           const gridVal = Math.round(ratio * rawMaxVal);
           return (
             <g key={idx}>
               <line
-                x1={paddingX - 10}
+                x1={paddingX - 8}
                 y1={y}
-                x2={width - paddingX + 10}
+                x2={width - paddingX + 8}
                 y2={y}
                 stroke="#e2e8f0"
                 strokeDasharray="4 4"
@@ -85,71 +82,67 @@ function ProfessionalSvgChart({ data, valueKey = "count", colorScheme = "emerald
                 y={y + 3}
                 fill="#94a3b8"
                 fontSize="9"
-                fontWeight="bold"
+                fontWeight="600"
                 textAnchor="end"
               >
                 {gridVal >= 1000000
                   ? `${(gridVal / 1000000).toFixed(1)}M`
                   : gridVal >= 1000
-                  ? `${(gridVal / 1000).toFixed(0)}k`
-                  : gridVal}
+                    ? `${(gridVal / 1000).toFixed(0)}k`
+                    : gridVal}
               </text>
             </g>
           );
         })}
 
-        {/* Gradient Filled Area */}
+        {/* Area Fill */}
         <path d={areaD} fill={`url(#${gradientId})`} />
 
-        {/* Curved Main Line */}
+        {/* Main Smooth Line */}
         <path
           d={pathD}
           fill="none"
           stroke={strokeColor}
-          strokeWidth="3.5"
+          strokeWidth="3"
           strokeLinecap="round"
           strokeLinejoin="round"
         />
 
-        {/* Data Nodes & X-Axis Labels */}
+        {/* Interactive Data Points */}
         {points.map((pt, i) => {
           const isHovered = hoveredIdx === i;
           return (
             <g
               key={i}
-              className="cursor-pointer group"
+              className="cursor-pointer"
               onMouseEnter={() => setHoveredIdx(i)}
               onMouseLeave={() => setHoveredIdx(null)}
             >
-              {/* Outer Glow Ring on Hover */}
               {isHovered && (
                 <circle
                   cx={pt.x}
                   cy={pt.y}
-                  r="10"
+                  r="11"
                   fill={strokeColor}
-                  fillOpacity="0.25"
+                  fillOpacity="0.18"
+                  className="transition-all duration-200"
                 />
               )}
-
-              {/* Node Circle */}
               <circle
                 cx={pt.x}
                 cy={pt.y}
-                r={isHovered ? "6" : "4"}
+                r={isHovered ? "5" : "3.5"}
                 fill="#ffffff"
                 stroke={strokeColor}
-                strokeWidth={isHovered ? "3" : "2.5"}
+                strokeWidth={isHovered ? "3" : "2"}
                 className="transition-all duration-200"
               />
-
-              {/* X-Axis Label */}
               <text
                 x={pt.x}
-                y={height - 8}
+                y={height - 10}
                 fill={isHovered ? strokeColor : "#64748b"}
                 fontSize="10"
-                fontWeight={isHovered ? "bold" : "600"}
+                fontWeight={isHovered ? "700" : "500"}
                 textAnchor="middle"
               >
                 {pt.label}
@@ -159,18 +152,18 @@ function ProfessionalSvgChart({ data, valueKey = "count", colorScheme = "emerald
         })}
       </svg>
 
-      {/* Floating Hover Callout Tooltip with Smart Position Bounds */}
+      {/* Dynamic Hover Tooltip */}
       {selectedPt && (
         <div
-          className={`absolute z-20 pointer-events-none transform ${transformX} ${transformY} bg-slate-900 text-white text-xs font-extrabold px-3 py-1.5 rounded-xl shadow-lg border border-slate-700 flex flex-col items-center gap-0.5 transition-all`}
+          className="absolute z-30 pointer-events-none transform -translate-x-1/2 -translate-y-full -mt-3 bg-slate-900 text-white text-xs px-3 py-1.5 rounded-lg shadow-xl border border-slate-700/80 flex flex-col items-center gap-0.5 transition-all duration-150"
           style={{
             left: `${(selectedPt.x / width) * 100}%`,
             top: `${(selectedPt.y / height) * 100}%`,
           }}
         >
-          <span className="text-[10px] text-slate-300 font-normal">{selectedPt.label}</span>
-          <span className={`font-mono ${colorScheme === "emerald" ? "text-emerald-400" : "text-amber-400"}`}>
-            {formatTooltip ? formatTooltip(selectedPt.value) : `${selectedPt.value.toLocaleString()}`}
+          <span className="text-[10px] text-slate-400 font-medium">{selectedPt.label}</span>
+          <span className={`font-semibold ${isEmerald ? "text-emerald-400" : "text-amber-400"}`}>
+            {formatTooltip ? formatTooltip(selectedPt.value) : selectedPt.value.toLocaleString()}
           </span>
         </div>
       )}
@@ -178,6 +171,79 @@ function ProfessionalSvgChart({ data, valueKey = "count", colorScheme = "emerald
   );
 }
 
+// ============================================================================
+// 2. HELPER UI COMPONENTS
+// ============================================================================
+function MetricCard({
+  title,
+  value,
+  subtext,
+  icon,
+  badge,
+  badgeType = "emerald",
+}) {
+  const badgeStyles = {
+    emerald: "bg-emerald-50 text-emerald-700 border-emerald-200/80",
+    amber: "bg-amber-50 text-amber-700 border-amber-200/80",
+    sky: "bg-sky-50 text-sky-700 border-sky-200/80",
+    slate: "bg-slate-100 text-slate-700 border-slate-200",
+  };
+
+  return (
+    <div className="group bg-white border border-slate-200/80 hover:border-slate-300 rounded-2xl p-5 shadow-xs hover:shadow-md transition-all duration-200 flex flex-col justify-between">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-semibold text-slate-500 tracking-wide uppercase">
+          {title}
+        </span>
+        <div className="w-10 h-10 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-center text-slate-600 text-lg group-hover:scale-105 transition-transform duration-200">
+          {icon}
+        </div>
+      </div>
+      <div className="mt-4">
+        <h3 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
+          {value}
+        </h3>
+        <div className="flex items-center justify-between mt-2">
+          <p className="text-xs text-slate-500 font-medium truncate">{subtext}</p>
+          {badge && (
+            <span
+              className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border ${badgeStyles[badgeType]}`}
+            >
+              {badge}
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TimeframeFilter({
+  selected,
+  onChange,
+  color = "emerald",
+}) {
+  const activeBg = color === "emerald" ? "bg-emerald-600 text-white" : "bg-amber-500 text-white";
+
+  return (
+    <div className="flex items-center gap-1 bg-slate-100/80 p-1 rounded-lg border border-slate-200/60 shrink-0">
+      {["daily", "monthly", "yearly"].map((tf) => (
+        <button
+          key={tf}
+          onClick={() => onChange(tf)}
+          className={`px-2.5 py-1 rounded-md text-[11px] font-bold capitalize transition-all duration-150 ${selected === tf ? `${activeBg} shadow-xs` : "text-slate-600 hover:text-slate-900"
+            }`}
+        >
+          {tf}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ============================================================================
+// 3. MAIN ADMIN DASHBOARD PAGE
+// ============================================================================
 export default function AdminDashboardPage() {
   const [stats, setStats] = useState({
     totalMembers: 0,
@@ -195,20 +261,21 @@ export default function AdminDashboardPage() {
     activeRatio: 0,
     gentsCount: 0,
     ladiesCount: 0,
+    otherCount: 0,
   });
 
   const [recentActivity, setRecentActivity] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // Timeframe Toggle States for Graphs
-  const [attendanceTimeframe, setAttendanceTimeframe] = useState("daily"); // 'daily' | 'monthly' | 'yearly'
-  const [paymentTimeframe, setPaymentTimeframe] = useState("daily"); // 'daily' | 'monthly' | 'yearly'
+  // Timeframe Toggle States
+  const [attendanceTimeframe, setAttendanceTimeframe] = useState("daily");
+  const [paymentTimeframe, setPaymentTimeframe] = useState("daily");
 
-  // Raw Database Cache for Dynamic Aggregations
+  // Database Caches
   const [allAttendance, setAllAttendance] = useState([]);
   const [allPayments, setAllPayments] = useState([]);
 
-  // Default Daily Graphs Data
+  // Default Daily Graphs Fallbacks
   const [attendanceGraphData, setAttendanceGraphData] = useState([
     { day: "Mon", count: 24 },
     { day: "Tue", count: 35 },
@@ -237,10 +304,8 @@ export default function AdminDashboardPage() {
     setLoading(true);
     if (isSupabaseConfigured()) {
       try {
-        // 1. Fetch All Member Profiles & Compute Status Counts
-        const { data: profilesData } = await supabase
-          .from("profiles")
-          .select("*");
+        // 1. Fetch Profiles
+        const { data: profilesData } = await supabase.from("profiles").select("*");
 
         let totalM = 0;
         let activeM = 0;
@@ -248,31 +313,26 @@ export default function AdminDashboardPage() {
         let plansMap = {};
         let gents = 0;
         let ladies = 0;
+        let otherG = 0;
 
         if (profilesData && profilesData.length > 0) {
           totalM = profilesData.length;
           profilesData.forEach((p) => {
-            if (p.status === "Active") {
-              activeM += 1;
-            } else {
-              inactiveM += 1;
-            }
+            if (p.status === "Active") activeM += 1;
+            else inactiveM += 1;
 
             const planName = p.plan || "Standard Membership";
             plansMap[planName] = (plansMap[planName] || 0) + 1;
 
-            if (p.gender === "Female" || p.shift === "Ladies") {
-              ladies += 1;
-            } else {
-              gents += 1;
-            }
+            if (p.gender === "Female") ladies += 1;
+            else if (p.gender === "Other") otherG += 1;
+            else gents += 1;
           });
         } else {
-          // Fallback default initial stats if database empty
-          totalM = profilesData ? profilesData.length : 48;
+          totalM = 48;
           activeM = 42;
           inactiveM = 6;
-          plansMap = { "Pro Membership": 28, "Standard Membership": 14, "VIP Membership": 6 };
+          plansMap = { "Pro Membership": 28, "Standard Membership": 14, "VIP Package": 6 };
           gents = 32;
           ladies = 16;
         }
@@ -283,9 +343,10 @@ export default function AdminDashboardPage() {
           activeRatio: activeRatioVal,
           gentsCount: gents,
           ladiesCount: ladies,
+          otherCount: otherG,
         });
 
-        // 2. Fetch Today Check-ins & Attendance Logs
+        // 2. Fetch Attendance
         const todayStart = new Date();
         todayStart.setHours(0, 0, 0, 0);
 
@@ -294,11 +355,7 @@ export default function AdminDashboardPage() {
           .select("*", { count: "exact", head: true })
           .gte("check_in_time", todayStart.toISOString());
 
-        const { data: attData } = await supabase
-          .from("attendance")
-          .select("check_in_time");
-
-        let totalAttCount = attData ? attData.length : 1240;
+        const { data: attData } = await supabase.from("attendance").select("check_in_time");
 
         if (attData && attData.length > 0) {
           setAllAttendance(attData);
@@ -309,27 +366,22 @@ export default function AdminDashboardPage() {
           for (let i = 6; i >= 0; i--) {
             const d = new Date();
             d.setDate(d.getDate() - i);
-            const dayName = daysOrder[d.getDay()];
-            daysMap[dayName] = 0;
+            daysMap[daysOrder[d.getDay()]] = 0;
           }
 
           attData.forEach((row) => {
             if (row.check_in_time) {
               const dayName = daysOrder[new Date(row.check_in_time).getDay()];
-              if (daysMap[dayName] !== undefined) {
-                daysMap[dayName] += 1;
-              }
+              if (daysMap[dayName] !== undefined) daysMap[dayName] += 1;
             }
           });
 
-          const formattedAttGraph = Object.entries(daysMap).map(([day, count]) => ({
-            day,
-            count,
-          }));
-          setAttendanceGraphData(formattedAttGraph);
+          setAttendanceGraphData(
+            Object.entries(daysMap).map(([day, count]) => ({ day, count }))
+          );
         }
 
-        // 3. Fetch Payments & Financial Calculations
+        // 3. Fetch Payments
         const { data: paymentsData } = await supabase
           .from("payments")
           .select("*")
@@ -338,22 +390,21 @@ export default function AdminDashboardPage() {
         let cumTotalRev = 0;
         let currentMonthRev = 0;
         const now = new Date();
-        const currentMonthIdx = now.getMonth();
-        const currentYearVal = now.getFullYear();
 
         if (paymentsData && paymentsData.length > 0) {
           setAllPayments(paymentsData);
-          
-          const formattedPaymentsList = paymentsData.slice(0, 6).map((p) => ({
-            id: p.id || Math.random().toString(),
-            member_name: p.member_name || p.profiles?.full_name || "Gym Member",
-            amount: p.amount || 0,
-            date: p.date || p.created_at ? new Date(p.date || p.created_at).toLocaleDateString() : "Today",
-            method: p.method || "Cash / Desk",
-            status: p.status || "Completed",
-            plan: p.plan || "Membership Fee",
-          }));
-          setRecentPayments(formattedPaymentsList);
+
+          setRecentPayments(
+            paymentsData.slice(0, 5).map((p) => ({
+              id: p.id || Math.random().toString(),
+              member_name: p.member_name || p.profiles?.full_name || "Gym Member",
+              amount: p.amount || 0,
+              date: p.date || p.created_at ? new Date(p.date || p.created_at).toLocaleDateString() : "Today",
+              method: p.method || "Cash / Desk",
+              status: p.status || "Completed",
+              plan: p.plan || "Membership Fee",
+            }))
+          );
 
           paymentsData.forEach((p) => {
             const amt = parseFloat(p.amount) || 0;
@@ -361,7 +412,10 @@ export default function AdminDashboardPage() {
 
             if (p.date || p.created_at) {
               const pDate = new Date(p.date || p.created_at);
-              if (pDate.getMonth() === currentMonthIdx && pDate.getFullYear() === currentYearVal) {
+              if (
+                pDate.getMonth() === now.getMonth() &&
+                pDate.getFullYear() === now.getFullYear()
+              ) {
                 currentMonthRev += amt;
               }
             }
@@ -373,8 +427,7 @@ export default function AdminDashboardPage() {
           for (let i = 6; i >= 0; i--) {
             const d = new Date();
             d.setDate(d.getDate() - i);
-            const dayName = daysOrder[d.getDay()];
-            payDaysMap[dayName] = 0;
+            payDaysMap[daysOrder[d.getDay()]] = 0;
           }
 
           paymentsData.forEach((p) => {
@@ -386,25 +439,21 @@ export default function AdminDashboardPage() {
             }
           });
 
-          const formattedPayGraph = Object.entries(payDaysMap).map(([day, amount]) => ({
-            day,
-            amount,
-          }));
-          setPaymentGraphData(formattedPayGraph);
+          setPaymentGraphData(
+            Object.entries(payDaysMap).map(([day, amount]) => ({ day, amount }))
+          );
         } else {
-          // Fallback initial sample payments if database is newly initialized
           cumTotalRev = 485000;
           currentMonthRev = 145000;
           setRecentPayments([
-            { id: "1", member_name: "Muhammad Hamza", amount: 5000, date: "2026-08-12", method: "Cash / Desk", status: "Completed", plan: "Pro Membership" },
-            { id: "2", member_name: "Usman Ali", amount: 4500, date: "2026-08-11", method: "Bank Transfer", status: "Completed", plan: "Standard Membership" },
-            { id: "3", member_name: "Ayesha Malik", amount: 6000, date: "2026-08-10", method: "JazzCash", status: "Completed", plan: "Ladies Special Plan" },
-            { id: "4", member_name: "Zainab Bibi", amount: 5000, date: "2026-08-09", method: "Easypaisa", status: "Completed", plan: "Pro Membership" },
-            { id: "5", member_name: "Bilal Chaudhry", amount: 15000, date: "2026-08-08", method: "Cash / Desk", status: "Completed", plan: "Quarterly Package" },
+            { id: "1", member_name: "Muhammad Hamza", amount: 5000, date: "Aug 12", method: "Cash", status: "Completed", plan: "Pro Membership" },
+            { id: "2", member_name: "Usman Ali", amount: 4500, date: "Aug 11", method: "Bank Transfer", status: "Completed", plan: "Standard Plan" },
+            { id: "3", member_name: "Ayesha Malik", amount: 6000, date: "Aug 10", method: "JazzCash", status: "Completed", plan: "Ladies Plan" },
+            { id: "4", member_name: "Zainab Bibi", amount: 5000, date: "Aug 09", method: "Easypaisa", status: "Completed", plan: "Pro Membership" },
+            { id: "5", member_name: "Bilal Chaudhry", amount: 15000, date: "Aug 08", method: "Cash", status: "Completed", plan: "Quarterly VIP" },
           ]);
         }
 
-        // Set compiled stats
         setStats({
           totalMembers: totalM,
           activeMembers: activeM,
@@ -412,10 +461,10 @@ export default function AdminDashboardPage() {
           todayCheckIns: checkInCount || (attData ? attData.length : 18),
           monthlyRevenue: `PKR ${Number(currentMonthRev).toLocaleString()}`,
           totalRevenue: `PKR ${Number(cumTotalRev).toLocaleString()}`,
-          totalAttendance: totalAttCount,
+          totalAttendance: attData ? attData.length : 1240,
         });
 
-        // 4. Fetch Recent Registered Profiles
+        // 4. Fetch Activity
         const { data: recentProfiles } = await supabase
           .from("profiles")
           .select("*")
@@ -423,14 +472,15 @@ export default function AdminDashboardPage() {
           .limit(5);
 
         if (recentProfiles && recentProfiles.length > 0) {
-          const formatted = recentProfiles.map((p) => ({
-            id: p.id,
-            name: p.full_name || "Member",
-            time: p.created_at ? new Date(p.created_at).toLocaleDateString() : "Today",
-            status: p.status || "Active",
-            plan: p.plan || "Pro Membership",
-          }));
-          setRecentActivity(formatted);
+          setRecentActivity(
+            recentProfiles.map((p) => ({
+              id: p.id,
+              name: p.full_name || "Member",
+              time: p.created_at ? new Date(p.created_at).toLocaleDateString() : "Today",
+              status: p.status || "Active",
+              plan: p.plan || "Pro Membership",
+            }))
+          );
         }
       } catch (err) {
         console.warn("Supabase fetch notice:", err);
@@ -439,8 +489,8 @@ export default function AdminDashboardPage() {
     setLoading(false);
   };
 
-  // Dynamic Attendance Graph Data Generator (Strict DB Real Data Only)
-  const getAttendanceGraphData = () => {
+  // Dynamic Data Aggregators
+  const currentAttGraphData = useMemo(() => {
     if (attendanceTimeframe === "monthly") {
       const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
       const monthCounts = Array(12).fill(0);
@@ -450,12 +500,9 @@ export default function AdminDashboardPage() {
           if (!isNaN(m)) monthCounts[m] += 1;
         }
       });
-      return monthNames.map((name, idx) => ({
-        label: name,
-        count: monthCounts[idx],
-      }));
+      return monthNames.map((name, idx) => ({ label: name, count: monthCounts[idx] }));
     } else if (attendanceTimeframe === "yearly") {
-      const yearsMap = { 2022: 0, 2023: 0, 2024: 0, 2025: 0, 2026: 0 };
+      const yearsMap = { 2023: 0, 2024: 0, 2025: 0, 2026: 0 };
       allAttendance.forEach((row) => {
         if (row.check_in_time) {
           const y = new Date(row.check_in_time).getFullYear();
@@ -465,10 +512,9 @@ export default function AdminDashboardPage() {
       return Object.entries(yearsMap).map(([yr, count]) => ({ label: yr, count }));
     }
     return attendanceGraphData.map((d) => ({ label: d.day, count: d.count }));
-  };
+  }, [attendanceTimeframe, allAttendance, attendanceGraphData]);
 
-  // Dynamic Payment Graph Data Generator (Strict DB Real Data Only)
-  const getPaymentGraphData = () => {
+  const currentPayGraphData = useMemo(() => {
     if (paymentTimeframe === "monthly") {
       const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
       const monthAmts = Array(12).fill(0);
@@ -476,18 +522,12 @@ export default function AdminDashboardPage() {
         const rawD = p.date || p.created_at;
         if (rawD) {
           const d = new Date(rawD);
-          if (!isNaN(d.getTime())) {
-            const m = d.getMonth();
-            monthAmts[m] += parseFloat(p.amount) || 0;
-          }
+          if (!isNaN(d.getTime())) monthAmts[d.getMonth()] += parseFloat(p.amount) || 0;
         }
       });
-      return monthNames.map((name, idx) => ({
-        label: name,
-        amount: monthAmts[idx],
-      }));
+      return monthNames.map((name, idx) => ({ label: name, amount: monthAmts[idx] }));
     } else if (paymentTimeframe === "yearly") {
-      const yearsMap = { 2022: 0, 2023: 0, 2024: 0, 2025: 0, 2026: 0 };
+      const yearsMap = { 2023: 0, 2024: 0, 2025: 0, 2026: 0 };
       allPayments.forEach((p) => {
         const rawD = p.date || p.created_at;
         if (rawD) {
@@ -501,347 +541,154 @@ export default function AdminDashboardPage() {
       return Object.entries(yearsMap).map(([yr, amount]) => ({ label: yr, amount }));
     }
     return paymentGraphData.map((d) => ({ label: d.day, amount: d.amount }));
-  };
-
-  const currentAttGraphData = getAttendanceGraphData();
-  const currentPayGraphData = getPaymentGraphData();
-
-  const maxAttCount = Math.max(...currentAttGraphData.map((d) => d.count), 1);
-  const maxPayAmount = Math.max(...currentPayGraphData.map((d) => d.amount), 1);
+  }, [paymentTimeframe, allPayments, paymentGraphData]);
 
   return (
-    <div className="space-y-8 max-w-7xl mx-auto font-sans">
-      {/* Top Banner / Welcome Header */}
-      <div className="bg-gradient-to-r from-emerald-800 via-emerald-700 to-teal-800 border border-emerald-600/30 rounded-2xl p-6 sm:p-7 shadow-md text-white flex flex-col md:flex-row items-start md:items-center justify-between gap-5">
-        <div>
-          <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-md bg-emerald-900/60 border border-emerald-500/30 text-[11px] font-bold tracking-wider uppercase mb-2 text-emerald-200">
-            <span>✨</span> System Operations Overview
+    <div className="space-y-8 max-w-7xl mx-auto font-sans p-2 sm:p-4 text-slate-800">
+      {/* HEADER BANNER */}
+      <div className="relative overflow-hidden bg-gradient-to-r from-slate-900 via-slate-800 to-emerald-950 rounded-3xl p-6 sm:p-8 shadow-md border border-slate-800 text-white flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+        <div className="space-y-1.5 z-10">
+          <div className="flex items-center gap-2">
+            <span className="bg-emerald-500/20 text-emerald-300 text-[11px] font-bold px-2.5 py-0.5 rounded-full border border-emerald-500/30 backdrop-blur-md">
+              Abdullah Gym Portal
+            </span>
+            <span className="text-slate-400 text-xs">• Live Manager Dashboard</span>
           </div>
-          <h2 className="text-2xl sm:text-3xl font-black tracking-tight">
-            Welcome Back, Abdullah Manager 👋
-          </h2>
-          <p className="text-xs sm:text-sm text-emerald-100/90 mt-1 max-w-2xl">
-            Real-time management dashboard displaying live member statistics, financial revenue analytics, attendance reports, and payment logs connected directly to Supabase.
+          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
+            Welcome back, Manager 👋
+          </h1>
+          <p className="text-xs sm:text-sm text-slate-300 max-w-xl">
+            Here is your daily gym overview for active members, collections, and check-in desk logs.
           </p>
         </div>
-        <div className="flex flex-wrap gap-3 shrink-0">
+
+        {/* Quick Action Navigation */}
+        <div className="flex flex-wrap gap-2.5 z-10 shrink-0">
           <Link
             href="/admin/members"
-            className="bg-white hover:bg-emerald-50 text-emerald-900 font-extrabold text-xs px-4 py-2.5 rounded-xl transition shadow-xs flex items-center gap-1.5"
+            className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs px-4 py-2.5 rounded-xl transition-all duration-150 shadow-sm flex items-center gap-1.5 hover:scale-[1.02]"
           >
-            <span>+</span> Register New Member
+            <span>＋</span> Add Member
           </Link>
           <Link
-            href="/admin/revenue"
-            className="bg-emerald-950/60 hover:bg-emerald-950 border border-emerald-400/40 text-emerald-100 font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5"
+            href="/admin/attendance"
+            className="bg-slate-800/80 hover:bg-slate-800 border border-slate-700 text-slate-200 font-semibold text-xs px-4 py-2.5 rounded-xl transition-all duration-150 flex items-center gap-1.5"
           >
-            <span>📊</span> Revenue Reports →
+            <span>⚡</span> Check-In
+          </Link>
+          <Link
+            href="/admin/payments"
+            className="bg-slate-800/80 hover:bg-slate-800 border border-slate-700 text-slate-200 font-semibold text-xs px-4 py-2.5 rounded-xl transition-all duration-150 flex items-center gap-1.5"
+          >
+            <span>💳</span> Payments
           </Link>
         </div>
       </div>
 
-      {/* ========================================================================= */}
-      {/* 8 CORE STATISTICAL METRIC CARDS (LIGHT THEME)                             */}
-      {/* ========================================================================= */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-        {/* Metric 1: Total Members */}
-        <div className="bg-white border border-slate-200/90 p-5 rounded-2xl shadow-xs hover:shadow-md transition-shadow space-y-3 relative overflow-hidden">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-              Total Members
-            </span>
-            <div className="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-700 flex items-center justify-center font-bold text-base">
-              👥
-            </div>
-          </div>
-          <div>
-            <p className="text-3xl font-black text-slate-900 tracking-tight">{loading ? "..." : stats.totalMembers}</p>
-            <div className="flex items-center gap-1.5 mt-1.5">
-              <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-                Registered
-              </span>
-              <span className="text-[11px] text-slate-500">Total member accounts</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Metric 2: Active Members */}
-        <div className="bg-white border border-slate-200/90 p-5 rounded-2xl shadow-xs hover:shadow-md transition-shadow space-y-3 relative overflow-hidden">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-              Active Members
-            </span>
-            <div className="w-10 h-10 rounded-xl bg-teal-50 border border-teal-200 text-teal-700 flex items-center justify-center font-bold text-base">
-              ✓
-            </div>
-          </div>
-          <div>
-            <p className="text-3xl font-black text-slate-900 tracking-tight">{loading ? "..." : stats.activeMembers}</p>
-            <div className="flex items-center gap-1.5 mt-1.5">
-              <span className="text-[11px] font-bold text-teal-700 bg-teal-50 px-2 py-0.5 rounded border border-teal-200">
-                {membershipStats.activeRatio}% Active Ratio
-              </span>
-              <span className="text-[11px] text-slate-500">Valid memberships</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Metric 3: Inactive Members */}
-        <div className="bg-white border border-slate-200/90 p-5 rounded-2xl shadow-xs hover:shadow-md transition-shadow space-y-3 relative overflow-hidden">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-              Inactive Members
-            </span>
-            <div className="w-10 h-10 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 flex items-center justify-center font-bold text-base">
-              ⌛
-            </div>
-          </div>
-          <div>
-            <p className="text-3xl font-black text-slate-900 tracking-tight">{loading ? "..." : stats.inactiveMembers}</p>
-            <div className="flex items-center gap-1.5 mt-1.5">
-              <span className="text-[11px] font-bold text-rose-700 bg-rose-50 px-2 py-0.5 rounded border border-rose-200">
-                Expired / Inactive
-              </span>
-              <span className="text-[11px] text-slate-500">Requires renewal</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Metric 4: Monthly Revenue */}
-        <div className="bg-white border border-slate-200/90 p-5 rounded-2xl shadow-xs hover:shadow-md transition-shadow space-y-3 relative overflow-hidden">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-              Monthly Revenue
-            </span>
-            <div className="w-10 h-10 rounded-xl bg-amber-50 border border-amber-200 text-amber-700 flex items-center justify-center font-bold text-base">
-              📅
-            </div>
-          </div>
-          <div>
-            <p className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight truncate">{loading ? "..." : stats.monthlyRevenue}</p>
-            <div className="flex items-center gap-1.5 mt-1.5">
-              <span className="text-[11px] font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
-                Current Month
-              </span>
-              <span className="text-[11px] text-slate-500">Fee collections</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Metric 5: Total Revenue */}
-        <div className="bg-white border border-slate-200/90 p-5 rounded-2xl shadow-xs hover:shadow-md transition-shadow space-y-3 relative overflow-hidden">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-              Total Revenue
-            </span>
-            <div className="w-10 h-10 rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-700 flex items-center justify-center font-bold text-base">
-              💳
-            </div>
-          </div>
-          <div>
-            <p className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight truncate">{loading ? "..." : stats.totalRevenue}</p>
-            <div className="flex items-center gap-1.5 mt-1.5">
-              <span className="text-[11px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200">
-                Cumulative
-              </span>
-              <span className="text-[11px] text-slate-500">Historical payments sum</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Metric 6: Today's Attendance */}
-        <div className="bg-white border border-slate-200/90 p-5 rounded-2xl shadow-xs hover:shadow-md transition-shadow space-y-3 relative overflow-hidden">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-              Today Check-Ins
-            </span>
-            <div className="w-10 h-10 rounded-xl bg-sky-50 border border-sky-200 text-sky-700 flex items-center justify-center font-bold text-base">
-              ⚡
-            </div>
-          </div>
-          <div>
-            <p className="text-3xl font-black text-slate-900 tracking-tight">{loading ? "..." : stats.todayCheckIns}</p>
-            <div className="flex items-center gap-1.5 mt-1.5">
-              <span className="text-[11px] font-bold text-sky-700 bg-sky-50 px-2 py-0.5 rounded border border-sky-200">
-                Daily Check-ins
-              </span>
-              <span className="text-[11px] text-slate-500">Gym entry logs</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Metric 7: Total Attendance Logs */}
-        <div className="bg-white border border-slate-200/90 p-5 rounded-2xl shadow-xs hover:shadow-md transition-shadow space-y-3 relative overflow-hidden">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-              Total Attendance Reports
-            </span>
-            <div className="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-700 flex items-center justify-center font-bold text-base">
-              📋
-            </div>
-          </div>
-          <div>
-            <p className="text-3xl font-black text-slate-900 tracking-tight">{loading ? "..." : stats.totalAttendance}</p>
-            <div className="flex items-center gap-1.5 mt-1.5">
-              <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-                All Logs
-              </span>
-              <span className="text-[11px] text-slate-500">Recorded visits</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Metric 8: Shift Distribution */}
-        <div className="bg-white border border-slate-200/90 p-5 rounded-2xl shadow-xs hover:shadow-md transition-shadow space-y-3 relative overflow-hidden">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-              Shift Split
-            </span>
-            <div className="w-10 h-10 rounded-xl bg-purple-50 border border-purple-200 text-purple-700 flex items-center justify-center font-bold text-base">
-              🏋️
-            </div>
-          </div>
-          <div>
-            <div className="flex items-center justify-between text-slate-900 font-extrabold text-lg">
-              <span>Gents: {membershipStats.gentsCount}</span>
-              <span className="text-slate-300">|</span>
-              <span className="text-purple-700">Ladies: {membershipStats.ladiesCount}</span>
-            </div>
-            <div className="flex items-center gap-1.5 mt-1.5">
-              <span className="text-[11px] font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-200">
-                Dedicated Shifts
-              </span>
-              <span className="text-[11px] text-slate-500">Gender distribution</span>
-            </div>
-          </div>
-        </div>
+      {/* METRIC CARDS */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
+        <MetricCard
+          title="Total Members"
+          value={loading ? "..." : stats.totalMembers}
+          subtext="Registered profiles"
+          icon="👥"
+          badge={`${stats.inactiveMembers} Expired`}
+          badgeType="slate"
+        />
+        <MetricCard
+          title="Active Members"
+          value={loading ? "..." : stats.activeMembers}
+          subtext="Valid active passes"
+          icon="✓"
+          badge={`${membershipStats.activeRatio}% Active`}
+          badgeType="emerald"
+        />
+        <MetricCard
+          title="Monthly Revenue"
+          value={loading ? "..." : stats.monthlyRevenue}
+          subtext="Current month total"
+          icon="💰"
+          badge="PKR"
+          badgeType="amber"
+        />
+        <MetricCard
+          title="Today Check-Ins"
+          value={loading ? "..." : stats.todayCheckIns}
+          subtext="Recorded visits"
+          icon="⚡"
+          badge="Live Log"
+          badgeType="sky"
+        />
       </div>
 
-      {/* ========================================================================= */}
-      {/* ATTENDANCE REPORTS & VISUAL CHARTS SECTION                                 */}
-      {/* ========================================================================= */}
+      {/* ANALYTICS CHARTS SECTION */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* ATTENDANCE REPORT & TREND GRAPH */}
-        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-5">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+        {/* Attendance Chart */}
+        <div className="bg-white border border-slate-200/80 rounded-2xl p-5 sm:p-6 shadow-xs flex flex-col justify-between space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="text-base font-extrabold text-slate-900">Attendance Reports & Trend</h3>
-                <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
-                  Live Log
-                </span>
+                <h3 className="text-base font-bold text-slate-900">Attendance Activity</h3>
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
               </div>
               <p className="text-xs text-slate-500 mt-0.5">
-                {attendanceTimeframe === "daily" && "Daily check-in volume for the past 7 days"}
-                {attendanceTimeframe === "monthly" && "Monthly check-in summary for the year"}
-                {attendanceTimeframe === "yearly" && "Yearly member attendance comparison"}
+                {attendanceTimeframe === "daily"
+                  ? "Daily member traffic for past 7 days"
+                  : attendanceTimeframe === "monthly"
+                    ? "Monthly check-ins volume"
+                    : "Yearly attendance totals"}
               </p>
             </div>
-
-            {/* Daily, Monthly, Yearly Toggle Buttons */}
-            <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl shrink-0 border border-slate-200">
-              <button
-                onClick={() => setAttendanceTimeframe("daily")}
-                className={`px-3 py-1 rounded-lg text-[10px] font-extrabold transition ${
-                  attendanceTimeframe === "daily"
-                    ? "bg-emerald-600 text-white shadow-xs"
-                    : "text-slate-600 hover:text-slate-900"
-                }`}
-              >
-                Daily
-              </button>
-              <button
-                onClick={() => setAttendanceTimeframe("monthly")}
-                className={`px-3 py-1 rounded-lg text-[10px] font-extrabold transition ${
-                  attendanceTimeframe === "monthly"
-                    ? "bg-emerald-600 text-white shadow-xs"
-                    : "text-slate-600 hover:text-slate-900"
-                }`}
-              >
-                Monthly
-              </button>
-              <button
-                onClick={() => setAttendanceTimeframe("yearly")}
-                className={`px-3 py-1 rounded-lg text-[10px] font-extrabold transition ${
-                  attendanceTimeframe === "yearly"
-                    ? "bg-emerald-600 text-white shadow-xs"
-                    : "text-slate-600 hover:text-slate-900"
-                }`}
-              >
-                Yearly
-              </button>
-            </div>
+            <TimeframeFilter
+              selected={attendanceTimeframe}
+              onChange={setAttendanceTimeframe}
+              color="emerald"
+            />
           </div>
 
-          {/* Sleek SVG Area Line Chart Container */}
           <ProfessionalSvgChart
             data={currentAttGraphData}
             valueKey="count"
             colorScheme="emerald"
-            formatTooltip={(val) => `${val.toLocaleString()} Check-Ins`}
+            formatTooltip={(val) => `${val.toLocaleString()} Visits`}
           />
 
-          <div className="flex items-center justify-between pt-1 text-xs text-slate-500 border-t border-slate-100">
-            <span>Peak Activity: <strong className="text-slate-800">Evening Shift (5 PM - 9 PM)</strong></span>
+          <div className="flex items-center justify-between pt-1 text-xs text-slate-500">
+            <span className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-emerald-600"></span>
+              Peak hours: <strong className="text-slate-800 font-semibold">5:00 PM – 9:00 PM</strong>
+            </span>
             <Link href="/admin/attendance" className="text-emerald-700 font-bold hover:underline">
-              View Full Attendance Logs →
+              Logs →
             </Link>
           </div>
         </div>
 
-        {/* REVENUE GRAPH WITH TIMEFRAME BUTTONS */}
-        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-5">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+        {/* Revenue Chart */}
+        <div className="bg-white border border-slate-200/80 rounded-2xl p-5 sm:p-6 shadow-xs flex flex-col justify-between space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="text-base font-extrabold text-slate-900">Revenue & Payment Analytics</h3>
-                <span className="text-[10px] font-bold text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
-                  PKR Currency
+                <h3 className="text-base font-bold text-slate-900">Revenue & Collections</h3>
+                <span className="text-[10px] font-bold text-amber-800 bg-amber-50 border border-amber-200/80 px-2 py-0.5 rounded-full">
+                  PKR
                 </span>
               </div>
               <p className="text-xs text-slate-500 mt-0.5">
-                {paymentTimeframe === "daily" && "Daily revenue collection in PKR (Past 7 Days)"}
-                {paymentTimeframe === "monthly" && "Monthly revenue totals in PKR (12 Months)"}
-                {paymentTimeframe === "yearly" && "Yearly revenue comparison in PKR"}
+                {paymentTimeframe === "daily"
+                  ? "Daily cash collection breakdown"
+                  : paymentTimeframe === "monthly"
+                    ? "Monthly overall revenue trends"
+                    : "Yearly revenue comparison"}
               </p>
             </div>
-
-            {/* Daily, Monthly, Yearly Toggle Buttons */}
-            <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl shrink-0 border border-slate-200">
-              <button
-                onClick={() => setPaymentTimeframe("daily")}
-                className={`px-3 py-1 rounded-lg text-[10px] font-extrabold transition ${
-                  paymentTimeframe === "daily"
-                    ? "bg-amber-500 text-white shadow-xs"
-                    : "text-slate-600 hover:text-slate-900"
-                }`}
-              >
-                Daily
-              </button>
-              <button
-                onClick={() => setPaymentTimeframe("monthly")}
-                className={`px-3 py-1 rounded-lg text-[10px] font-extrabold transition ${
-                  paymentTimeframe === "monthly"
-                    ? "bg-amber-500 text-white shadow-xs"
-                    : "text-slate-600 hover:text-slate-900"
-                }`}
-              >
-                Monthly
-              </button>
-              <button
-                onClick={() => setPaymentTimeframe("yearly")}
-                className={`px-3 py-1 rounded-lg text-[10px] font-extrabold transition ${
-                  paymentTimeframe === "yearly"
-                    ? "bg-amber-500 text-white shadow-xs"
-                    : "text-slate-600 hover:text-slate-900"
-                }`}
-              >
-                Yearly
-              </button>
-            </div>
+            <TimeframeFilter
+              selected={paymentTimeframe}
+              onChange={setPaymentTimeframe}
+              color="amber"
+            />
           </div>
 
-          {/* Sleek SVG Area Line Chart Container */}
           <ProfessionalSvgChart
             data={currentPayGraphData}
             valueKey="amount"
@@ -849,77 +696,67 @@ export default function AdminDashboardPage() {
             formatTooltip={(val) => `PKR ${val.toLocaleString()}`}
           />
 
-          <div className="flex items-center justify-between pt-1 text-xs text-slate-500 border-t border-slate-100">
-            <span>Primary Payment Method: <strong className="text-slate-800">Cash & Desk Payment</strong></span>
-            <Link href="/admin/revenue" className="text-amber-700 font-bold hover:underline">
-              Full Financial Analytics →
+          <div className="flex items-center justify-between pt-1 text-xs text-slate-500">
+            <span className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+              Primary source: <strong className="text-slate-800 font-semibold">Desk & Cash Transfers</strong>
+            </span>
+            <Link href="/admin/payments" className="text-amber-700 font-bold hover:underline">
+              Financials →
             </Link>
           </div>
         </div>
       </div>
 
-      {/* ========================================================================= */}
-      {/* RECENT PAYMENTS LOG TABLE & MEMBERSHIP STATISTICS BREAKDOWN                */}
-      {/* ========================================================================= */}
+      {/* TABLE & DEMOGRAPHICS BREAKDOWN */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* RECENT PAYMENTS LOG TABLE */}
-        <div className="lg:col-span-2 bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-4">
+        {/* Recent Transactions Table */}
+        <div className="lg:col-span-2 bg-white border border-slate-200/80 rounded-2xl p-5 sm:p-6 shadow-xs space-y-4">
           <div className="flex items-center justify-between border-b border-slate-100 pb-3">
             <div>
-              <h3 className="text-base font-extrabold text-slate-900">Recent Payment Transactions</h3>
-              <p className="text-xs text-slate-500">Live payment entries from members and daily guests</p>
+              <h3 className="text-base font-bold text-slate-900">Recent Payment Receipts</h3>
+              <p className="text-xs text-slate-500">Latest recorded fee collections</p>
             </div>
             <Link
               href="/admin/payments"
-              className="text-xs text-emerald-700 hover:text-emerald-800 hover:underline font-bold"
+              className="text-xs text-emerald-700 hover:text-emerald-800 font-bold hover:underline"
             >
-              View All Invoices →
+              View Invoices →
             </Link>
           </div>
 
           {loading ? (
-            <div className="py-12 text-center text-xs text-slate-400">Loading recent payments...</div>
+            <div className="py-12 text-center text-xs text-slate-400">Loading payment records...</div>
           ) : recentPayments.length === 0 ? (
             <div className="py-12 text-center text-xs text-slate-500">
-              No payment transactions logged yet. Click <span className="text-emerald-700 font-bold">"Payments & Invoices"</span> to record a new receipt.
+              No payments logged yet.
             </div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse">
                 <thead>
-                  <tr className="border-b border-slate-200 text-[11px] font-bold text-slate-500 uppercase tracking-wider bg-slate-50/80">
-                    <th className="py-3 px-3.5 rounded-l-lg">Member Name</th>
-                    <th className="py-3 px-3.5">Plan / Description</th>
-                    <th className="py-3 px-3.5">Date</th>
-                    <th className="py-3 px-3.5">Method</th>
-                    <th className="py-3 px-3.5 text-right">Amount (PKR)</th>
-                    <th className="py-3 px-3.5 rounded-r-lg text-center">Status</th>
+                  <tr className="border-b border-slate-100 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                    <th className="pb-3 font-semibold">Member</th>
+                    <th className="pb-3 font-semibold">Plan</th>
+                    <th className="pb-3 font-semibold">Amount</th>
+                    <th className="pb-3 font-semibold">Method</th>
+                    <th className="pb-3 text-right font-semibold">Date</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-xs">
                   {recentPayments.map((p) => (
-                    <tr key={p.id} className="hover:bg-slate-50 transition-colors">
-                      <td className="py-3.5 px-3.5 font-bold text-slate-900 flex items-center gap-2.5">
-                        <div className="w-7 h-7 rounded-full bg-emerald-100 border border-emerald-200 text-emerald-800 font-bold text-xs flex items-center justify-center shrink-0">
-                          {p.member_name.charAt(0)}
-                        </div>
-                        <span className="truncate">{p.member_name}</span>
+                    <tr key={p.id} className="hover:bg-slate-50/80 transition-colors">
+                      <td className="py-3 font-bold text-slate-900">{p.member_name}</td>
+                      <td className="py-3 text-slate-600">{p.plan}</td>
+                      <td className="py-3 font-mono font-bold text-emerald-700">
+                        PKR {Number(p.amount).toLocaleString()}
                       </td>
-                      <td className="py-3.5 px-3.5 text-slate-600 font-medium">{p.plan}</td>
-                      <td className="py-3.5 px-3.5 text-slate-500">{p.date}</td>
-                      <td className="py-3.5 px-3.5 text-slate-600">
-                        <span className="px-2 py-0.5 bg-slate-100 rounded border border-slate-200 font-medium text-[11px]">
+                      <td className="py-3">
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold bg-slate-100 text-slate-700">
                           {p.method}
                         </span>
                       </td>
-                      <td className="py-3.5 px-3.5 text-right font-black text-slate-900">
-                        PKR {Number(p.amount).toLocaleString()}
-                      </td>
-                      <td className="py-3.5 px-3.5 text-center">
-                        <span className="inline-block px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                          {p.status}
-                        </span>
-                      </td>
+                      <td className="py-3 text-right text-slate-400 font-medium">{p.date}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -928,85 +765,56 @@ export default function AdminDashboardPage() {
           )}
         </div>
 
-        {/* MEMBERSHIP STATISTICS & BREAKDOWN */}
-        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-5">
-          <h3 className="text-base font-extrabold text-slate-900 border-b border-slate-100 pb-3">
-            Membership Statistics
-          </h3>
+        {/* Membership Demographics & Breakdown */}
+        <div className="bg-white border border-slate-200/80 rounded-2xl p-5 sm:p-6 shadow-xs flex flex-col justify-between space-y-5">
+          <div>
+            <div className="border-b border-slate-100 pb-3">
+              <h3 className="text-base font-bold text-slate-900">Demographics & Packages</h3>
+              <p className="text-xs text-slate-500">Active distribution by tier & gender</p>
+            </div>
 
-          {/* Active vs Inactive Ratio Progress Bar */}
-          <div className="space-y-2 bg-slate-50 p-4 rounded-xl border border-slate-200/80">
-            <div className="flex items-center justify-between text-xs font-bold text-slate-800">
-              <span>Active vs Inactive Ratio</span>
-              <span className="text-emerald-700 font-black">{membershipStats.activeRatio}% Active</span>
-            </div>
-            <div className="w-full h-3 bg-slate-200 rounded-full overflow-hidden flex">
-              <div
-                className="h-full bg-emerald-600 rounded-l-full transition-all duration-500"
-                style={{ width: `${membershipStats.activeRatio}%` }}
-                title="Active Members"
-              />
-              <div
-                className="h-full bg-rose-400 rounded-r-full transition-all duration-500"
-                style={{ width: `${100 - membershipStats.activeRatio}%` }}
-                title="Inactive Members"
-              />
-            </div>
-            <div className="flex justify-between text-[11px] text-slate-500 pt-1">
-              <span className="flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-emerald-600 inline-block" />
-                Active ({stats.activeMembers})
+            {/* Plan Distribution Segment */}
+            <div className="mt-4 space-y-3">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                Plan Popularity
               </span>
-              <span className="flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-rose-400 inline-block" />
-                Inactive ({stats.inactiveMembers})
-              </span>
+              <div className="space-y-2.5">
+                {Object.entries(membershipStats.planCounts).map(([planName, count]) => {
+                  const percentage = stats.totalMembers > 0 ? Math.round((count / stats.totalMembers) * 100) : 0;
+                  return (
+                    <div key={planName} className="space-y-1">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-semibold text-slate-700">{planName}</span>
+                        <span className="font-mono text-slate-500 font-medium">{count} ({percentage}%)</span>
+                      </div>
+                      <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-emerald-500 rounded-full transition-all duration-500"
+                          style={{ width: `${percentage}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </div>
 
-          {/* Breakdown by Plan Type */}
-          <div className="space-y-3">
-            <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider">
-              Distribution by Plan Type
-            </h4>
-
-            {Object.keys(membershipStats.planCounts).length === 0 ? (
-              <div className="text-xs text-slate-400 py-2">No plans distributed yet.</div>
-            ) : (
-              Object.entries(membershipStats.planCounts).map(([planName, count]) => {
-                const percentage = stats.totalMembers > 0 ? Math.round((count / stats.totalMembers) * 100) : 0;
-                return (
-                  <div key={planName} className="space-y-1">
-                    <div className="flex items-center justify-between text-xs font-bold">
-                      <span className="text-slate-800">{planName}</span>
-                      <span className="text-slate-600 font-mono">{count} members ({percentage}%)</span>
-                    </div>
-                    <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-teal-600 rounded-full"
-                        style={{ width: `${Math.max(5, percentage)}%` }}
-                      />
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </div>
-
-          {/* Quick Module Navigation Buttons */}
-          <div className="pt-3 border-t border-slate-100 space-y-2">
-            <Link
-              href="/admin/configuration"
-              className="w-full block text-center py-2.5 px-3 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs rounded-xl border border-slate-200 transition"
-            >
-              ⚙️ Manage Gym Plans & Pricing
-            </Link>
-            <Link
-              href="/admin/attendance"
-              className="w-full block text-center py-2.5 px-3 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-bold text-xs rounded-xl border border-emerald-200 transition"
-            >
-              ⚡ Open Member Check-In Desk
-            </Link>
+          {/* Gender Split Display */}
+          <div className="pt-4 border-t border-slate-100">
+            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-3">
+              Gender Ratio
+            </span>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="bg-slate-50 border border-slate-100 p-3 rounded-xl text-center">
+                <span className="text-xs text-slate-500 font-medium">Gents</span>
+                <p className="text-lg font-extrabold text-slate-900 mt-0.5">{membershipStats.gentsCount}</p>
+              </div>
+              <div className="bg-slate-50 border border-slate-100 p-3 rounded-xl text-center">
+                <span className="text-xs text-slate-500 font-medium">Ladies</span>
+                <p className="text-lg font-extrabold text-slate-900 mt-0.5">{membershipStats.ladiesCount}</p>
+              </div>
+            </div>
           </div>
         </div>
       </div>

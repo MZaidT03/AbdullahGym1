@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   email TEXT NOT NULL,
   full_name TEXT,
+  gender TEXT DEFAULT 'Male' CHECK (gender IN ('Male', 'Female', 'Other')),
   avatar_url TEXT,
   role TEXT DEFAULT 'member' CHECK (role IN ('member', 'admin', 'trainer')),
   member_id TEXT UNIQUE,
@@ -23,6 +24,9 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Migration for existing database tables:
+ALTER TABLE IF EXISTS public.profiles ADD COLUMN IF NOT EXISTS gender TEXT DEFAULT 'Male';
 
 -- Enable RLS for Profiles
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
@@ -95,11 +99,12 @@ BEGIN
   -- Generate a clean Member ID e.g., GP-8472-991
   generated_id := 'GP-' || floor(random() * (9000-1000 + 1) + 1000)::text || '-' || floor(random() * (999-100 + 1) + 100)::text;
 
-  INSERT INTO public.profiles (id, email, full_name, avatar_url, role, member_id, plan, days_remaining, status)
+  INSERT INTO public.profiles (id, email, full_name, gender, avatar_url, role, member_id, plan, days_remaining, status)
   VALUES (
     NEW.id,
     NEW.email,
     COALESCE(NEW.raw_user_meta_data->>'full_name', SPLIT_PART(NEW.email, '@', 1)),
+    COALESCE(NEW.raw_user_meta_data->>'gender', 'Male'),
     COALESCE(NEW.raw_user_meta_data->>'avatar_url', 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=250'),
     COALESCE(NEW.raw_user_meta_data->>'role', 'member'),
     generated_id,
@@ -109,7 +114,8 @@ BEGIN
   )
   ON CONFLICT (id) DO UPDATE SET
     email = EXCLUDED.email,
-    full_name = EXCLUDED.full_name;
+    full_name = EXCLUDED.full_name,
+    gender = EXCLUDED.gender;
 
   RETURN NEW;
 END;

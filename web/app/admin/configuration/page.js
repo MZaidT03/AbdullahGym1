@@ -598,24 +598,31 @@ export default function AdminConfigurationPage() {
   const handleSaveGeneralConfig = async (e) => {
     e.preventDefault();
 
+    const digitsOnlyWa = (gymConfig.whatsapp || "").replace(/\D/g, "");
+    if (gymConfig.whatsapp && digitsOnlyWa.length !== 11) {
+      setSettingsSavedMsg("⚠️ Error: Official WhatsApp number must be 11 digits (e.g. 03208313000).");
+      setTimeout(() => setSettingsSavedMsg(""), 5000);
+      return;
+    }
+
     if (isSupabaseConfigured()) {
       try {
         const { error } = await supabase
           .from("gym_settings")
           .upsert({ key: "general_settings", value: gymConfig, updated_at: new Date().toISOString() });
         if (!error) {
-          setSettingsSavedMsg("General settings saved directly in Supabase DB!");
+          setSettingsSavedMsg("✓ General settings saved successfully!");
         } else {
           setSettingsSavedMsg(`Notice: ${error.message}`);
         }
       } catch (err) {
-        setSettingsSavedMsg("Saved locally.");
+        setSettingsSavedMsg("✓ Saved locally.");
       }
     } else {
       try {
         localStorage.setItem("abdullah_gym_general_config", JSON.stringify(gymConfig));
       } catch (e) {}
-      setSettingsSavedMsg("Saved to local storage.");
+      setSettingsSavedMsg("✓ Saved to local storage.");
     }
     setTimeout(() => setSettingsSavedMsg(""), 5000);
   };
@@ -677,71 +684,53 @@ export default function AdminConfigurationPage() {
   };
 
   return (
-    <div className="space-y-8 max-w-7xl mx-auto font-sans">
+    <div className="space-y-6 max-w-7xl mx-auto font-sans">
       {/* Top Header */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-slate-200 pb-5">
-        <div>
-          <h1 className="text-2xl font-black text-slate-900 tracking-tight">Admin Configuration & Pricing</h1>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Manage base plans, configure Supabase Add-On Services, reset passwords, and set gym shifts.
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-xs font-bold text-emerald-700">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            Supabase Config Sync Active
-          </span>
-        </div>
+      <div className="border-b border-slate-200 pb-4">
+        <h1 className="text-xl font-black text-slate-900 tracking-tight">Gym Plans & Member Password Manager</h1>
+        <p className="text-xs text-slate-500 mt-0.5">
+          Manage gym membership rates, add-on services, and reset member login passwords.
+        </p>
       </div>
 
       {/* Tabs Bar */}
       <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-3">
         <button
           onClick={() => setActiveTab("plans")}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-extrabold transition-all ${
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-extrabold transition-all ${
             activeTab === "plans"
               ? "bg-emerald-600 text-white shadow-xs"
               : "bg-white text-slate-600 hover:text-slate-900 border border-slate-200"
           }`}
         >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          Manage Base Plans & Add-Ons
+          <span>💳</span> Plans & Add-On Pricing
+        </button>
+
+        <button
+          onClick={() => setActiveTab("geofence")}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-extrabold transition-all ${
+            activeTab === "geofence"
+              ? "bg-emerald-600 text-white shadow-xs"
+              : "bg-white text-slate-600 hover:text-slate-900 border border-slate-200"
+          }`}
+        >
+          <span>📍</span> GPS Geofencing Settings
         </button>
 
         <button
           onClick={() => setActiveTab("passwords")}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-extrabold transition-all ${
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-extrabold transition-all ${
             activeTab === "passwords"
               ? "bg-emerald-600 text-white shadow-xs"
               : "bg-white text-slate-600 hover:text-slate-900 border border-slate-200"
           }`}
         >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
-          </svg>
-          Reset Member Passwords
-        </button>
-
-        <button
-          onClick={() => setActiveTab("settings")}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-extrabold transition-all ${
-            activeTab === "settings"
-              ? "bg-emerald-600 text-white shadow-xs"
-              : "bg-white text-slate-600 hover:text-slate-900 border border-slate-200"
-          }`}
-        >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-          </svg>
-          Gym Shifts & Settings
+          <span>🔑</span> Reset Member Passwords
         </button>
       </div>
 
       {/* ========================================================================= */}
-      {/* TAB 1: MANAGE BASE PLANS & DYNAMIC SUPABASE ADD-ONS */}
+      {/* TAB 1: MANAGE BASE PLANS & ADD-ONS */}
       {/* ========================================================================= */}
       {activeTab === "plans" && (
         <div className="space-y-8">
@@ -749,15 +738,10 @@ export default function AdminConfigurationPage() {
           <div className="space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
-                <h2 className="text-lg font-extrabold text-slate-900">Base Membership Plans</h2>
+                <h2 className="text-base font-extrabold text-slate-900">Gym Base Membership Plans</h2>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Configure primary membership tiers stored in Supabase table <code className="text-emerald-700 font-bold">gym_plans</code>.
+                  Set monthly subscription rates and daily pass prices for members.
                 </p>
-                {planStatusMsg && (
-                  <p className="text-[11px] font-bold text-emerald-800 mt-1 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 inline-block">
-                    {planStatusMsg}
-                  </p>
-                )}
               </div>
               <button
                 onClick={handleOpenAddModal}
@@ -766,7 +750,7 @@ export default function AdminConfigurationPage() {
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
                 </svg>
-                Add Base Plan to Supabase
+                + Create New Plan
               </button>
             </div>
 
@@ -867,20 +851,20 @@ export default function AdminConfigurationPage() {
             )}
           </div>
 
-          {/* DYNAMIC SUPABASE ADD-ON SERVICES SECTION */}
+          {/* DYNAMIC ADD-ON SERVICES SECTION */}
           <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-5">
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
               <div>
                 <div className="flex items-center gap-2">
                   <h3 className="text-base font-extrabold text-slate-900">
-                    Stackable Add-On Services (Stored in Supabase)
+                    Stackable Add-On Services
                   </h3>
                   <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200 font-mono">
-                    Supabase Live Sync
+                    Active Services
                   </span>
                 </div>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Create and manage separate add-on service fees (e.g. Cardio, Personal Trainer, VIP Locker, Sauna Pass) synced live to Supabase.
+                  Create and manage separate add-on service fees (e.g. Cardio, Personal Trainer, VIP Locker, Sauna Pass).
                 </p>
                 {addonStatusMsg && (
                   <p className="text-[11px] font-bold text-emerald-800 mt-1 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 inline-block font-mono">
@@ -896,13 +880,13 @@ export default function AdminConfigurationPage() {
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
                 </svg>
-                Add New Add-On to Supabase
+                + Add New Add-On
               </button>
             </div>
 
-            {/* Grid of Dynamic Add-Ons fetched from Supabase */}
+            {/* Grid of Dynamic Add-Ons */}
             {loadingAddons ? (
-              <div className="py-12 text-center text-xs text-slate-400">Loading Add-On Services from Supabase...</div>
+              <div className="py-12 text-center text-xs text-slate-400">Loading Add-On Services...</div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
                 {addons.map((a) => (
@@ -1003,10 +987,10 @@ export default function AdminConfigurationPage() {
           </div>
 
           {/* Table of Members */}
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="border-b border-slate-200 text-[11px] font-bold text-slate-500 uppercase tracking-wider bg-slate-50/80">
+          <div className="overflow-auto max-h-[calc(100vh-320px)] rounded-xl border border-slate-100">
+            <table className="w-full text-left border-collapse relative">
+              <thead className="sticky top-0 bg-slate-50 z-10 shadow-2xs">
+                <tr className="border-b border-slate-200 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
                   <th className="py-3 px-3.5 rounded-l-lg">Member Name</th>
                   <th className="py-3 px-3.5">Member ID</th>
                   <th className="py-3 px-3.5">Email / Mobile Username</th>
@@ -1054,124 +1038,10 @@ export default function AdminConfigurationPage() {
       )}
 
       {/* ========================================================================= */}
-      {/* TAB 3: GENERAL GYM CONFIGURATION & GPS GEOFENCING */}
+      {/* TAB: GPS GEOFENCING & LOCATION ENFORCEMENT */}
       {/* ========================================================================= */}
-      {activeTab === "settings" && (
+      {activeTab === "geofence" && (
         <div className="space-y-6">
-          {/* GENERAL GYM CONFIG CARD */}
-          <div className="bg-white border border-slate-200 rounded-2xl p-6 sm:p-8 shadow-xs max-w-3xl space-y-6">
-            <div>
-              <h2 className="text-base font-extrabold text-slate-900">General Gym Configuration & Shift Timings</h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Set official gym contact info, WhatsApp numbers, shift schedules, and address.
-              </p>
-            </div>
-
-            {settingsSavedMsg && (
-              <div className="p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold rounded-xl font-mono">
-                ✓ {settingsSavedMsg}
-              </div>
-            )}
-
-            <form onSubmit={handleSaveGeneralConfig} className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Gym Name</label>
-                  <input
-                    type="text"
-                    required
-                    value={gymConfig.gymName}
-                    onChange={(e) => setGymConfig({ ...gymConfig, gymName: e.target.value })}
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-emerald-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Currency</label>
-                  <input
-                    type="text"
-                    required
-                    value={gymConfig.currency}
-                    onChange={(e) => setGymConfig({ ...gymConfig, currency: e.target.value })}
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-emerald-500"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Official WhatsApp</label>
-                  <input
-                    type="text"
-                    required
-                    value={gymConfig.whatsapp}
-                    onChange={(e) => setGymConfig({ ...gymConfig, whatsapp: e.target.value })}
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-emerald-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Support Email</label>
-                  <input
-                    type="email"
-                    required
-                    value={gymConfig.email}
-                    onChange={(e) => setGymConfig({ ...gymConfig, email: e.target.value })}
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-emerald-500"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-emerald-700 uppercase mb-1">
-                    Ladies Dedicated Shift
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={gymConfig.ladiesShift}
-                    onChange={(e) => setGymConfig({ ...gymConfig, ladiesShift: e.target.value })}
-                    className="w-full bg-emerald-50/50 border border-emerald-300 rounded-xl px-4 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-emerald-500 font-medium"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
-                    Gents Shift Timings
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={gymConfig.gentsShift}
-                    onChange={(e) => setGymConfig({ ...gymConfig, gentsShift: e.target.value })}
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-emerald-500 font-medium"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Gym Physical Address</label>
-                <textarea
-                  rows={2}
-                  value={gymConfig.address}
-                  onChange={(e) => setGymConfig({ ...gymConfig, address: e.target.value })}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-emerald-500"
-                />
-              </div>
-
-              <div className="pt-3 border-t border-slate-200 flex justify-end">
-                <button
-                  type="submit"
-                  className="px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl transition shadow-xs"
-                >
-                  Save General Settings to Supabase
-                </button>
-              </div>
-            </form>
-          </div>
-
-          {/* GPS GEOFENCING & LOCATION ENFORCEMENT CONFIG CARD */}
           <div className="bg-white border border-slate-200 rounded-2xl p-6 sm:p-8 shadow-xs max-w-3xl space-y-6">
             <div className="flex items-center justify-between border-b border-slate-100 pb-4">
               <div>
@@ -1179,7 +1049,7 @@ export default function AdminConfigurationPage() {
                   <span>📍</span> GPS Geofencing & Location Enforcement
                 </h2>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Configure the gym's physical GPS coordinates and allowed check-in radius stored in Supabase.
+                  Configure the gym's physical GPS location coordinates and check-in radius.
                 </p>
               </div>
               <span
@@ -1278,7 +1148,7 @@ export default function AdminConfigurationPage() {
                   type="submit"
                   className="px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl transition shadow-xs self-end sm:self-auto"
                 >
-                  Save Geofence Settings to Supabase
+                  Save Geofence Settings
                 </button>
               </div>
             </form>
@@ -1295,7 +1165,7 @@ export default function AdminConfigurationPage() {
                 <h3 className="text-base font-extrabold text-slate-900">
                   {editingPlan ? "Edit Plan Pricing & Rates" : "Create New Membership Plan"}
                 </h3>
-                <p className="text-[11px] text-slate-500">Changes update directly in Supabase table.</p>
+                <p className="text-[11px] text-slate-500">Changes update directly across membership registration.</p>
               </div>
               <button onClick={() => setIsPlanModalOpen(false)} className="text-slate-400 hover:text-slate-700 font-bold text-sm cursor-pointer hover:bg-slate-100 p-1.5 rounded-lg transition">
                 ✕
@@ -1366,7 +1236,7 @@ export default function AdminConfigurationPage() {
                   type="submit"
                   className="px-5 py-2 bg-emerald-600 text-xs font-bold text-white rounded-xl hover:bg-emerald-700 shadow-xs"
                 >
-                  Save Plan to Supabase
+                  Save Plan
                 </button>
               </div>
             </form>
@@ -1381,9 +1251,9 @@ export default function AdminConfigurationPage() {
             <div className="flex items-center justify-between border-b border-slate-200 pb-3">
               <div>
                 <h3 className="text-base font-extrabold text-slate-900">
-                  {editingAddon ? "Edit Add-On Service" : "Add New Add-On Service to Supabase"}
+                  {editingAddon ? "Edit Add-On Service" : "Add New Add-On Service"}
                 </h3>
-                <p className="text-[11px] text-slate-500">Changes save directly to Supabase database.</p>
+                <p className="text-[11px] text-slate-500">Changes save directly to membership plans.</p>
               </div>
               <button onClick={() => setIsAddonModalOpen(false)} className="text-slate-400 hover:text-slate-700 font-bold text-sm cursor-pointer hover:bg-slate-100 p-1.5 rounded-lg transition">
                 ✕
@@ -1458,7 +1328,7 @@ export default function AdminConfigurationPage() {
                   type="submit"
                   className="px-5 py-2 bg-emerald-600 text-xs font-bold text-white rounded-xl hover:bg-emerald-700 shadow-xs"
                 >
-                  Save Add-On to Supabase
+                  Save Add-On Service
                 </button>
               </div>
             </form>
@@ -1527,7 +1397,7 @@ export default function AdminConfigurationPage() {
       {/* REUSABLE LOADING ANIMATION OVERLAY */}
       <LoadingOverlay
         isLoading={resetSubmitting || detectingGps}
-        message={detectingGps ? "Detecting GPS Coordinates..." : "Updating Password in Supabase..."}
+        message={detectingGps ? "Detecting GPS Coordinates..." : "Updating Member Password..."}
       />
     </div>
   );

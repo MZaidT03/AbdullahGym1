@@ -1,28 +1,108 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+
+import { supabase, isSupabaseConfigured } from "../../lib/supabaseClient";
 
 export default function AdminLayout({ children }) {
   const pathname = usePathname();
   const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true); // Desktop sidebar toggle state
+  const [checkingAuth, setCheckingAuth] = useState(true);
+
+  // Auto-collapse sidebar on smaller laptop screens (< 1024px) for optimal workspace
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.innerWidth < 1024) {
+      setSidebarOpen(false);
+    }
+  }, []);
+
+  // 1. Strict Authentication Route Guard
+  useEffect(() => {
+    if (pathname === "/admin/login") {
+      setCheckingAuth(false);
+      return;
+    }
+
+    const checkAdminAuth = async () => {
+      let isAuthenticated = false;
+
+      // A. Verify Supabase Session & Admin Role
+      if (isSupabaseConfigured()) {
+        try {
+          const { data: sessionData } = await supabase.auth.getSession();
+          if (sessionData?.session?.user) {
+            const { data: profile } = await supabase
+              .from("profiles")
+              .select("role")
+              .eq("id", sessionData.session.user.id)
+              .single();
+
+            if (profile && profile.role === "admin") {
+              isAuthenticated = true;
+            }
+          }
+        } catch (e) {
+          console.warn("Auth check notice:", e);
+        }
+      }
+
+      // B. Verify Local Authentication Token
+      if (!isAuthenticated) {
+        const isAuthLocal = localStorage.getItem("admin_authenticated") === "true";
+        if (isAuthLocal) {
+          isAuthenticated = true;
+        }
+      }
+
+      if (!isAuthenticated) {
+        // Redirect unauthenticated user to login immediately
+        router.replace("/admin/login");
+      } else {
+        setCheckingAuth(false);
+      }
+    };
+
+    checkAdminAuth();
+  }, [pathname, router]);
 
   // Hide admin layout styling on the admin login page
   if (pathname === "/admin/login") {
     return <>{children}</>;
   }
 
-  const handleLogout = () => {
+  // Show security loading overlay while validating session
+  if (checkingAuth) {
+    return (
+      <div className="min-h-screen bg-white flex flex-col items-center justify-center p-6 text-slate-800 font-sans">
+        <div className="w-12 h-12 bg-emerald-600 rounded-2xl flex items-center justify-center font-black text-white text-lg shadow-md mb-4 animate-bounce">
+          AG
+        </div>
+        <h3 className="text-sm font-extrabold text-slate-900 tracking-tight">
+          Verifying Admin Access & Session...
+        </h3>
+        <p className="text-xs text-slate-400 mt-1">Checking secure credentials</p>
+      </div>
+    );
+  }
+
+  const handleLogout = async () => {
+    try {
+      await supabase.auth.signOut();
+    } catch (e) {
+      console.warn("Signout notice:", e);
+    }
     localStorage.removeItem("admin_authenticated");
+    localStorage.removeItem("admin_user_id");
     router.push("/admin/login");
   };
 
   const navItems = [
     {
-      name: "Dashboard Overview",
+      name: "Dashboard",
       href: "/admin",
       icon: (
         <svg className="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -31,7 +111,7 @@ export default function AdminLayout({ children }) {
       ),
     },
     {
-      name: "Member Management",
+      name: "Members",
       href: "/admin/members",
       icon: (
         <svg className="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -40,7 +120,7 @@ export default function AdminLayout({ children }) {
       ),
     },
     {
-      name: "Attendance Logs",
+      name: "Attendance Desk",
       href: "/admin/attendance",
       icon: (
         <svg className="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -58,7 +138,7 @@ export default function AdminLayout({ children }) {
       ),
     },
     {
-      name: "Revenue Analytics",
+      name: "Revenue Reports",
       href: "/admin/revenue",
       icon: (
         <svg className="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -67,7 +147,7 @@ export default function AdminLayout({ children }) {
       ),
     },
     {
-      name: "Configuration & Plans",
+      name: "Plans & Settings",
       href: "/admin/configuration",
       icon: (
         <svg className="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -79,10 +159,10 @@ export default function AdminLayout({ children }) {
   ];
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col md:flex-row font-sans overflow-x-hidden">
+    <div className="h-screen max-h-screen overflow-hidden bg-slate-50 text-slate-900 flex flex-col md:flex-row font-sans">
       {/* Sidebar Desktop */}
       <aside
-        className={`hidden md:flex flex-col bg-white border-r border-slate-200 p-4 shrink-0 transition-all duration-300 shadow-xs ${
+        className={`hidden md:flex flex-col bg-white border-r border-slate-200 p-4 shrink-0 transition-all duration-300 shadow-xs h-full ${
           sidebarOpen ? "w-64" : "w-20 items-center"
         }`}
       >
@@ -243,24 +323,24 @@ export default function AdminLayout({ children }) {
       )}
 
       {/* Main Content Viewport */}
-      <main className="flex-1 flex flex-col overflow-y-auto">
+      <main className="flex-1 flex flex-col h-full overflow-hidden min-w-0">
         {/* Top Header */}
-        <header className="hidden md:flex items-center justify-between bg-white border-b border-slate-200 px-8 py-4 shadow-2xs">
+        <header className="hidden md:flex items-center justify-between bg-white border-b border-slate-200 px-8 py-3.5 shadow-2xs shrink-0">
           <div>
-            <h1 className="text-lg font-bold text-slate-900 tracking-tight">Administration Dashboard</h1>
-            <p className="text-xs text-slate-500">Real-time gym management & operational analytics</p>
+            <h1 className="text-base font-extrabold text-slate-900 tracking-tight">Abdullah Gym 1 Admin</h1>
+            <p className="text-[11px] text-slate-500">Real-time gym management & daily operational portal</p>
           </div>
 
           <div className="flex items-center gap-4">
-            <span className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-emerald-50 border border-emerald-200 text-xs font-semibold text-emerald-700">
+            <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-xs font-bold text-emerald-700">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              Live Supabase Connected
+              System Online
             </span>
           </div>
         </header>
 
         {/* Page Content Body */}
-        <div className="p-4 sm:p-8 flex-1 bg-slate-50">{children}</div>
+        <div className="p-4 sm:p-6 flex-1 bg-slate-50 overflow-y-auto min-h-0">{children}</div>
       </main>
     </div>
   );
