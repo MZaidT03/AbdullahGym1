@@ -20,6 +20,7 @@ import { useAuth } from '../context/AuthContext';
 import { useDialog } from '../context/DialogContext';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import GymHeader from '../components/GymHeader';
+import NotificationService from '../services/NotificationService';
 import colors from '../constants/colors';
 import theme from '../constants/theme';
 
@@ -37,6 +38,7 @@ export const ProfileScreen = ({ navigation }) => {
 
   useEffect(() => {
     fetchTotalCheckIns();
+    NotificationService.arePushNotificationsEnabled().then(setPushNotifications);
   }, [user?.id]);
 
   const fetchTotalCheckIns = async () => {
@@ -320,12 +322,13 @@ export const ProfileScreen = ({ navigation }) => {
               trackColor={{ false: '#E2E8F0', true: colors.primary }}
               thumbColor={pushNotifications ? colors.white : '#94A3B8'}
               ios_backgroundColor="#E2E8F0"
-              onValueChange={(val) => {
+              onValueChange={async (val) => {
                 setPushNotifications(val);
+                await NotificationService.setPushNotificationsEnabled(val);
                 showDialog({
                   title: val ? 'Notifications Enabled 🔔' : 'Notifications Disabled 🔕',
                   message: val
-                    ? 'You will now receive gym check-in alerts, payment reminders & announcements.'
+                    ? 'You will now receive fee deadline alerts, 10-day renewal notices & check-in updates.'
                     : 'Push notifications have been turned off.',
                   type: val ? 'success' : 'info',
                 });

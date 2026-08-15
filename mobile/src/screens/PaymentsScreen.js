@@ -13,7 +13,7 @@ import {
   ActivityIndicator,
   RefreshControl,
   Clipboard,
-  Platform
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -22,6 +22,7 @@ import { useDialog } from '../context/DialogContext';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import GymHeader from '../components/GymHeader';
 import PaymentCard from '../components/PaymentCard';
+import NotificationService from '../services/NotificationService';
 import colors from '../constants/colors';
 import theme from '../constants/theme';
 
@@ -62,7 +63,7 @@ export const PaymentsScreen = () => {
 
   // Form states
   const [selectedAccIndex, setSelectedAccIndex] = useState(0);
-  const [amount, setAmount] = useState(String(memberFee)); // Dynamic monthly fee according to member plan (e.g. 12000 for Pro Plus)
+  const [amount, setAmount] = useState(String(memberFee));
   const [transactionNote, setTransactionNote] = useState('');
   const [screenshotUri, setScreenshotUri] = useState(null);
   const [submitting, setSubmitting] = useState(false);
@@ -102,7 +103,11 @@ export const PaymentsScreen = () => {
           console.warn('Error fetching payments:', error.message);
           setPayments(getFallbackPayments());
         } else {
-          setPayments(data && data.length > 0 ? data : getFallbackPayments());
+          const list = data && data.length > 0 ? data : getFallbackPayments();
+          setPayments(list);
+          if (data && data.length > 0) {
+            NotificationService.evaluatePaymentApprovedNotification(data, user).catch(() => {});
+          }
         }
       } catch (err) {
         console.error('Payments fetch error:', err);
@@ -203,16 +208,16 @@ export const PaymentsScreen = () => {
 
       const pickerResult = useCamera
         ? await ImagePicker.launchCameraAsync({
-          allowsEditing: true,
-          quality: 0.15,
-          base64: true,
-        })
+            allowsEditing: true,
+            quality: 0.15,
+            base64: true,
+          })
         : await ImagePicker.launchImageLibraryAsync({
-          mediaTypes: ImagePicker.MediaTypeOptions?.Images || 'Images',
-          allowsEditing: true,
-          quality: 0.15,
-          base64: true,
-        });
+            mediaTypes: ImagePicker.MediaTypeOptions?.Images || 'Images',
+            allowsEditing: true,
+            quality: 0.15,
+            base64: true,
+          });
 
       if (!pickerResult.canceled && pickerResult.assets && pickerResult.assets.length > 0) {
         const asset = pickerResult.assets[0];
@@ -241,28 +246,97 @@ export const PaymentsScreen = () => {
   const currentMonth = now.getMonth();
   const currentMonthName = now.toLocaleString('default', { month: 'long' });
 
-  const currentMonthPayment = payments.find((p) => {
-    if (!p.date) return false;
-    const pDate = new Date(p.date);
-    return (
-      pDate.getFullYear() === currentYear &&
-      pDate.getMonth() === currentMonth &&
-      p.status !== 'Failed' &&
-      p.status !== 'Rejected'
-    );
-  });
+  const latestPaidPayment = payments.find((p) => p.status === 'Paid');
+  const latestPendingPayment = payments.find(
+    (p) => p.status === 'Pending Approval' || p.status === 'Pending'
+  );
 
-  const isCurrentMonthPaid = currentMonthPayment?.status === 'Paid';
-  const isCurrentMonthPending = currentMonthPayment?.status === 'Pending Approval' || currentMonthPayment?.status === 'Pending';
-  const isMonthlyPaymentDone = isCurrentMonthPaid || isCurrentMonthPending;
+  const hasPendingProof = Boolean(
+    latestPendingPayment &&
+      (!latestPaidPayment || new Date(latestPendingPayment.date) >= new Date(latestPaidPayment.date))
+  );
+
+  const daysRemaining = user?.daysRemaining ?? 30;
+  const overdueDays = user?.overdueDays ?? 0;
+  const isGracePeriod = overdueDays > 0 && overdueDays <= 7;
+  const isExpired = overdueDays > 7 || user?.status === 'Expired' || user?.status === 'Deactivated';
+
+  // Payment window rule:
+  // "any member can pay their fee in last 10 days when their membership expires to 7 day grace period"
+  const isRenewalWindowOpen = daysRemaining <= 10 && daysRemaining > 0;
+  const isEligibleToPay = isRenewalWindowOpen || isGracePeriod || isExpired || !latestPaidPayment;
+
+  // Calculate Expiry Date & Renewal Open Date strings with stacked consecutive cycles
+  let expiryDateObj = null;
+  let renewalOpenDateObj = null;
+
+  const paidPayments = payments
+    .filter((p) => p.status === 'Paid' && p.date)
+    .sort((a, b) => new Date(a.date) - new Date(b.date));
+
+  if (paidPayments.length > 0) {
+    let runningExpiry = null;
+    paidPayments.forEach((pay) => {
+      const payDate = new Date(pay.date);
+      if (!runningExpiry) {
+        runningExpiry = new Date(payDate.getTime() + 30 * 86400000);
+      } else if (payDate <= runningExpiry) {
+        // Early renewal: +30 days added after previous month completion
+        runningExpiry = new Date(runningExpiry.getTime() + 30 * 86400000);
+      } else {
+        runningExpiry = new Date(payDate.getTime() + 30 * 86400000);
+      }
+    });
+    expiryDateObj = runningExpiry;
+  } else if (user?.expiryDate) {
+    expiryDateObj = new Date(user.expiryDate);
+  } else {
+    expiryDateObj = new Date(now);
+    expiryDateObj.setDate(expiryDateObj.getDate() + daysRemaining);
+  }
+
+  if (expiryDateObj) {
+    renewalOpenDateObj = new Date(expiryDateObj);
+    renewalOpenDateObj.setDate(renewalOpenDateObj.getDate() - 10);
+  }
+
+  const expiryDateStr = expiryDateObj
+    ? expiryDateObj.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })
+    : `${currentMonthName} 30, ${currentYear}`;
+
+  const renewalOpenDateStr = renewalOpenDateObj
+    ? renewalOpenDateObj.toLocaleDateString([], { month: 'short', day: 'numeric' })
+    : '10 days before expiry';
+
+  // Dynamic status for plan card
+  let planStatus = 'Active';
+  if (hasPendingProof) {
+    planStatus = 'Pending Approval';
+  } else if (isExpired) {
+    planStatus = 'Expired';
+  } else if (isGracePeriod) {
+    planStatus = `Grace Period (Day ${overdueDays}/7)`;
+  } else if (isRenewalWindowOpen) {
+    planStatus = `Renewal Open (${daysRemaining}d Left)`;
+  } else {
+    planStatus = 'Paid ✓';
+  }
 
   const handleSubmitOnlinePayment = async () => {
-    if (isMonthlyPaymentDone) {
+    if (hasPendingProof) {
       showDialog({
-        title: 'Monthly Fee Completed 🔒',
-        message: isCurrentMonthPaid
-          ? `You have already paid your monthly fee for ${currentMonthName}. Next payment will be due next month.`
-          : `Your payment proof for ${currentMonthName} has already been submitted and is under admin review.`,
+        title: 'Proof Under Review ⏳',
+        message: 'Your payment transfer proof has already been submitted and is currently being verified by admin.',
+        type: 'info',
+      });
+      setModalVisible(false);
+      return;
+    }
+
+    if (!isEligibleToPay) {
+      showDialog({
+        title: 'Renewal Window Not Open 🔒',
+        message: `Payment renewal opens 10 days before expiry (on ${renewalOpenDateStr}). You currently have ${daysRemaining} days remaining on your active membership.`,
         type: 'info',
       });
       setModalVisible(false);
@@ -363,18 +437,20 @@ export const PaymentsScreen = () => {
         }
       }
 
-      showDialog({
-        title: 'Payment Proof Submitted! 🚀',
-        message: `Thank you! Your ${activeAccount.provider} transfer proof has been submitted. The admin will verify and approve your membership shortly.`,
-        type: 'success',
-        confirmText: 'Great!',
-        onConfirm: () => setModalVisible(false),
-      });
-
-      // Refresh list
+      // Close modal and reset state immediately
+      setModalVisible(false);
       setScreenshotUri(null);
       setTransactionNote('');
+
+      showDialog({
+        title: 'Payment Proof Submitted! 🚀',
+        message: `Thank you! Your ${activeAccount.provider} transfer proof has been submitted. The admin will verify and approve your membership renewal shortly.`,
+        type: 'success',
+      });
+
+      // Refresh list & profile
       await fetchPayments();
+      if (refreshProfile) await refreshProfile();
     } catch (err) {
       console.error('Error submitting online payment:', err);
       showDialog({
@@ -387,31 +463,27 @@ export const PaymentsScreen = () => {
     }
   };
 
-  const latestPayment = payments.length > 0 ? payments[0] : null;
-  const planStatus = isCurrentMonthPaid
-    ? 'Paid'
-    : isCurrentMonthPending
-      ? 'Pending Approval'
-      : latestPayment
-        ? latestPayment.status
-        : user?.status || 'Active';
-
   const handlePayPress = () => {
-    if (isCurrentMonthPaid) {
+    if (hasPendingProof) {
       showDialog({
-        title: `Monthly Fee Paid (${currentMonthName}) ✓`,
-        message: `You have already paid your monthly subscription fee for ${currentMonthName}. Next payment will be due next month.`,
-        type: 'success',
-      });
-    } else if (isCurrentMonthPending) {
-      showDialog({
-        title: `Payment Proof Under Review ⏳`,
-        message: `Your payment proof screenshot for ${currentMonthName} has already been submitted and is under admin review.`,
+        title: 'Payment Proof Under Review ⏳',
+        message:
+          'Your transfer proof has already been submitted and is currently under admin review. Your membership will be extended once verified.',
         type: 'info',
       });
-    } else {
-      setModalVisible(true);
+      return;
     }
+
+    if (!isEligibleToPay) {
+      showDialog({
+        title: 'Membership Active & Up-to-Date 🛡️',
+        message: `Your membership is active with ${daysRemaining} days remaining.\n\nRenewal payments open 10 days before expiry (on ${renewalOpenDateStr}).`,
+        type: 'info',
+      });
+      return;
+    }
+
+    setModalVisible(true);
   };
 
   return (
@@ -439,9 +511,13 @@ export const PaymentsScreen = () => {
           amount={`PKR ${memberFee.toLocaleString()}`}
           status={planStatus}
           nextDate={
-            isCurrentMonthPaid
-              ? 'Next Month'
-              : `${currentMonthName} 30, ${currentYear}`
+            hasPendingProof
+              ? 'Under Review'
+              : !isEligibleToPay
+              ? expiryDateStr
+              : isGracePeriod
+              ? `Grace Expiry: Day ${overdueDays}/7`
+              : expiryDateStr
           }
         />
 
@@ -463,33 +539,74 @@ export const PaymentsScreen = () => {
           </View>
         ) : null}
 
+        {/* Status / Window Banners */}
+        {hasPendingProof ? (
+          <View style={styles.pendingReviewBanner}>
+            <Ionicons name="hourglass-outline" size={16} color="#D97706" />
+            <Text style={styles.pendingReviewText}>
+              Proof Submitted: Awaiting admin approval to extend your membership pass.
+            </Text>
+          </View>
+        ) : isGracePeriod ? (
+          <View style={styles.gracePeriodBanner}>
+            <Ionicons name="warning-outline" size={16} color="#C2410C" />
+            <Text style={styles.gracePeriodText}>
+              ⚠️ 7-Day Grace Period (Day {overdueDays} of 7): Please pay your monthly fee before day 7 to prevent account expiration.
+            </Text>
+          </View>
+        ) : isRenewalWindowOpen ? (
+          <View style={styles.renewalOpenBanner}>
+            <Ionicons name="notifications-circle-outline" size={18} color={colors.primaryDark} />
+            <Text style={styles.renewalOpenText}>
+              🔔 10-Day Renewal Window Open: {daysRemaining} days left. Submit transfer proof now to renew for the next cycle.
+            </Text>
+          </View>
+        ) : !isEligibleToPay ? (
+          <View style={styles.earlyActiveBanner}>
+            <Ionicons name="shield-checkmark-outline" size={16} color="#047857" />
+            <Text style={styles.earlyActiveText}>
+              ✓ Membership Active ({daysRemaining} Days Left). Renewal opens 10 days before expiry (on {renewalOpenDateStr}).
+            </Text>
+          </View>
+        ) : null}
+
         {/* Monthly Fee Action CTA Button */}
         <TouchableOpacity
           style={[
             styles.mainPayBtn,
-            isCurrentMonthPaid && styles.paidMainBtn,
-            isCurrentMonthPending && styles.pendingMainBtn,
+            hasPendingProof && styles.pendingMainBtn,
+            !isEligibleToPay && !hasPendingProof && styles.activeMainBtn,
+            isGracePeriod && !hasPendingProof && styles.graceMainBtn,
+            isExpired && !hasPendingProof && styles.expiredMainBtn,
           ]}
           onPress={handlePayPress}
           activeOpacity={0.8}
         >
           <Ionicons
             name={
-              isCurrentMonthPaid
-                ? 'checkmark-circle'
-                : isCurrentMonthPending
-                  ? 'time'
-                  : 'cloud-upload'
+              hasPendingProof
+                ? 'time'
+                : !isEligibleToPay
+                ? 'shield-checkmark'
+                : isGracePeriod
+                ? 'alert-circle'
+                : isExpired
+                ? 'lock-closed'
+                : 'card'
             }
             size={20}
             color={colors.white}
           />
           <Text style={styles.mainPayBtnText}>
-            {isCurrentMonthPaid
-              ? `Monthly Fee Paid (${currentMonthName}) ✓`
-              : isCurrentMonthPending
-                ? 'Proof Under Review ⏳'
-                : `Submit Transfer Proof (${currentMonthName})`}
+            {hasPendingProof
+              ? 'Transfer Proof Under Review ⏳'
+              : !isEligibleToPay
+              ? `Membership Active (${daysRemaining} Days Left) ✓`
+              : isGracePeriod
+              ? `Pay Overdue Fee (Grace Day ${overdueDays}/7)`
+              : isExpired
+              ? `Pay Fee to Reactivate Account`
+              : `Submit Renewal Proof (PKR ${memberFee.toLocaleString()})`}
           </Text>
         </TouchableOpacity>
 
@@ -712,17 +829,136 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     ...theme.shadows.medium,
   },
-  paidMainBtn: {
-    backgroundColor: colors.primaryDark,
+  activeMainBtn: {
+    backgroundColor: '#0F172A',
   },
   pendingMainBtn: {
     backgroundColor: '#D97706',
   },
+  graceMainBtn: {
+    backgroundColor: '#EA580C',
+  },
+  expiredMainBtn: {
+    backgroundColor: '#DC2626',
+  },
   mainPayBtnText: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '800',
     color: colors.white,
     letterSpacing: 0.2,
+  },
+  pendingReviewBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#FEF3C7',
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+    borderRadius: 12,
+    padding: 10,
+    marginBottom: 12,
+  },
+  pendingReviewText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#92400E',
+    flex: 1,
+    lineHeight: 15,
+  },
+  gracePeriodBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#FFEDD5',
+    borderWidth: 1,
+    borderColor: '#FED7AA',
+    borderRadius: 12,
+    padding: 10,
+    marginBottom: 12,
+  },
+  gracePeriodText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#9A3412',
+    flex: 1,
+    lineHeight: 15,
+  },
+  renewalOpenBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1,
+    borderColor: '#DCFCE7',
+    borderRadius: 12,
+    padding: 10,
+    marginBottom: 12,
+  },
+  renewalOpenText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.primaryDark,
+    flex: 1,
+    lineHeight: 15,
+  },
+  earlyActiveBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 12,
+    padding: 10,
+    marginBottom: 12,
+  },
+  earlyActiveText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: colors.textSecondary,
+    flex: 1,
+    lineHeight: 15,
+  },
+  upcomingPlanCard: {
+    backgroundColor: '#FEF3C7',
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 12,
+    ...theme.shadows.soft,
+  },
+  upcomingHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 6,
+  },
+  upcomingIconBox: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    backgroundColor: '#FDE68A',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  upcomingTitle: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#92400E',
+    letterSpacing: 0.3,
+  },
+  upcomingSub: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#78350F',
+    marginTop: 1,
+  },
+  upcomingNote: {
+    fontSize: 11,
+    color: '#B45309',
+    lineHeight: 15,
+    fontWeight: '500',
   },
   sectionHeaderRow: {
     flexDirection: 'row',
@@ -980,47 +1216,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '800',
     color: colors.white,
-  },
-  upcomingPlanCard: {
-    backgroundColor: '#FEF3C7',
-    borderWidth: 1,
-    borderColor: '#FDE68A',
-    borderRadius: 16,
-    padding: 14,
-    marginBottom: 14,
-    ...theme.shadows.soft,
-  },
-  upcomingHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    marginBottom: 6,
-  },
-  upcomingIconBox: {
-    width: 28,
-    height: 28,
-    borderRadius: 8,
-    backgroundColor: '#FDE68A',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  upcomingTitle: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: '#92400E',
-    letterSpacing: 0.3,
-  },
-  upcomingSub: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: '#78350F',
-    marginTop: 1,
-  },
-  upcomingNote: {
-    fontSize: 11,
-    color: '#B45309',
-    lineHeight: 15,
-    fontWeight: '500',
   },
 });
 

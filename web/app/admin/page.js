@@ -406,7 +406,11 @@ export default function AdminDashboardPage() {
             }))
           );
 
-          paymentsData.forEach((p) => {
+          const paidPaymentsOnly = paymentsData.filter(
+            (p) => p.status === "Paid" || p.status === "Partial" || p.status === "Completed"
+          );
+
+          paidPaymentsOnly.forEach((p) => {
             const amt = parseFloat(p.amount) || 0;
             cumTotalRev += amt;
 
@@ -430,9 +434,9 @@ export default function AdminDashboardPage() {
             payDaysMap[daysOrder[d.getDay()]] = 0;
           }
 
-          paymentsData.forEach((p) => {
-            if (p.date) {
-              const dayName = daysOrder[new Date(p.date).getDay()];
+          paidPaymentsOnly.forEach((p) => {
+            if (p.date || p.created_at) {
+              const dayName = daysOrder[new Date(p.date || p.created_at).getDay()];
               if (payDaysMap[dayName] !== undefined) {
                 payDaysMap[dayName] += parseFloat(p.amount) || 0;
               }
@@ -515,10 +519,14 @@ export default function AdminDashboardPage() {
   }, [attendanceTimeframe, allAttendance, attendanceGraphData]);
 
   const currentPayGraphData = useMemo(() => {
+    const validPayments = allPayments.filter(
+      (p) => p.status === "Paid" || p.status === "Partial" || p.status === "Completed"
+    );
+
     if (paymentTimeframe === "monthly") {
       const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
       const monthAmts = Array(12).fill(0);
-      allPayments.forEach((p) => {
+      validPayments.forEach((p) => {
         const rawD = p.date || p.created_at;
         if (rawD) {
           const d = new Date(rawD);
@@ -528,7 +536,7 @@ export default function AdminDashboardPage() {
       return monthNames.map((name, idx) => ({ label: name, amount: monthAmts[idx] }));
     } else if (paymentTimeframe === "yearly") {
       const yearsMap = { 2023: 0, 2024: 0, 2025: 0, 2026: 0 };
-      allPayments.forEach((p) => {
+      validPayments.forEach((p) => {
         const rawD = p.date || p.created_at;
         if (rawD) {
           const d = new Date(rawD);

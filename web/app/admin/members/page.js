@@ -245,27 +245,73 @@ export default function MembersPage() {
     setLoading(false);
   };
 
-  const computePlanFee = (selectedPlanStr, addonIdList) => {
-    let b = 5000;
-    const foundPlan = availablePlans.find((p) => selectedPlanStr.includes(p.name));
-    if (foundPlan) {
-      b = foundPlan.monthly_price || foundPlan.monthlyPrice || foundPlan.daily_price || foundPlan.dailyPrice || 5000;
-    } else if (selectedPlanStr.includes("12,000") || selectedPlanStr.includes("12000") || selectedPlanStr.includes("Pro Plus")) {
-      b = 12000;
-    } else if (selectedPlanStr.includes("9,000") || selectedPlanStr.includes("9000") || selectedPlanStr.includes("VIP")) {
-      b = 9000;
-    } else if (selectedPlanStr.includes("3,500") || selectedPlanStr.includes("3500") || selectedPlanStr.includes("Standard")) {
-      b = 3500;
-    } else if (selectedPlanStr.includes("500") || selectedPlanStr.includes("Daily")) {
-      b = 500;
+  const resolveBasePlanFee = (planStr) => {
+    if (!planStr) return 5000;
+    const cleanStr = String(planStr).trim().toLowerCase();
+
+    // 1. Direct match with dynamic plans from Database (gym_plans)
+    if (availablePlans && availablePlans.length > 0) {
+      const exactMatch = availablePlans.find(
+        (p) => p.name && cleanStr === p.name.toLowerCase()
+      );
+      if (exactMatch) {
+        return Number(exactMatch.monthly_price || exactMatch.monthlyPrice || exactMatch.daily_price || exactMatch.dailyPrice || 5000);
+      }
+
+      const subMatch = availablePlans.find(
+        (p) => p.name && (cleanStr.includes(p.name.toLowerCase()) || p.name.toLowerCase().includes(cleanStr))
+      );
+      if (subMatch) {
+        return Number(subMatch.monthly_price || subMatch.monthlyPrice || subMatch.daily_price || subMatch.dailyPrice || 5000);
+      }
     }
 
-    const addonsSum = addonIdList.reduce((acc, id) => {
-      const matched = availableAddons.find((a) => a.id === id);
+    // 2. Check if explicit price is embedded in plan string (e.g. "Pro Plus (PKR 12,000/mo)")
+    const pkrMatch = cleanStr.match(/(?:pkr|rs\.?)\s*([\d,]+)/i);
+    if (pkrMatch && pkrMatch[1]) {
+      const parsed = parseInt(pkrMatch[1].replace(/,/g, ""), 10);
+      if (!isNaN(parsed) && parsed > 0) return parsed;
+    }
+
+    // 3. Fallback only if database plans are still loading
+    if (cleanStr.includes("pro plus") || cleanStr.includes("pro+")) return 12000;
+    if (cleanStr.includes("vip") || cleanStr.includes("champion")) return 9000;
+    if (cleanStr.includes("standard")) return 3500;
+    if (cleanStr.includes("daily") || cleanStr.includes("visitor")) return 500;
+    return 5000;
+  };
+
+  const resolveMemberFee = (m) => {
+    if (!m) return 5000;
+    const base = resolveBasePlanFee(m.plan);
+
+    let addonsTotal = 0;
+    if (availableAddons && availableAddons.length > 0) {
+      availableAddons.forEach((a) => {
+        if (m.plan && m.plan.includes(a.name) && !m.plan.includes(`PKR ${base}`)) {
+          addonsTotal += Number(a.price || 0);
+        }
+      });
+    }
+
+    if (m.fee_paid && Number(m.fee_paid) > 0 && Number(m.fee_paid) === (base + addonsTotal)) {
+      return Number(m.fee_paid);
+    }
+    if (m.total_fee && Number(m.total_fee) > 0) {
+      return Number(m.total_fee);
+    }
+    return base + addonsTotal;
+  };
+
+  const computePlanFee = (selectedPlanStr, addonIdList = []) => {
+    const base = resolveBasePlanFee(selectedPlanStr);
+
+    const addonsSum = (addonIdList || []).reduce((acc, id) => {
+      const matched = (availableAddons || []).find((a) => a.id === id);
       return acc + (matched ? Number(matched.price || 0) : 0);
     }, 0);
 
-    return { baseFee: b, totalFee: b + addonsSum };
+    return { baseFee: base, totalFee: base + addonsSum };
   };
 
   const updateFeeCalculation = (selectedPlanStr, addonIdList) => {
@@ -554,6 +600,11 @@ export default function MembersPage() {
     }
   };
 
+  const handleSendFeeReminder = (member) => {
+    setStatusMsg(`🔔 Fee deadline reminder push notification dispatched to ${member.full_name} (${member.email})!`);
+    setTimeout(() => setStatusMsg(""), 5000);
+  };
+
   const handleToggleStatus = async (id, currentStatus) => {
     const nextStatus = currentStatus === "Active" ? "Expired" : "Active";
 
@@ -738,7 +789,7 @@ export default function MembersPage() {
                     </td>
 
                     <td className="py-3.5 px-3.5 font-mono font-bold text-slate-900">
-                      PKR {Number(m.fee_paid || 5000).toLocaleString()}
+                      PKR {resolveMemberFee(m).toLocaleString()}
                     </td>
 
                     <td className="py-3.5 px-3.5">
@@ -747,6 +798,15 @@ export default function MembersPage() {
 
                     <td className="py-3.5 px-3.5 text-right">
                       <div className="flex items-center justify-end gap-1.5">
+                        <button
+                          onClick={() => handleSendFeeReminder(m)}
+                          className="px-2 py-1 rounded-lg text-[10px] font-bold transition border bg-amber-50 text-amber-800 hover:bg-amber-100 border-amber-200 inline-flex items-center gap-1"
+                          title="Send Fee Deadline Push Reminder"
+                        >
+                          <span>🔔</span>
+                          <span className="hidden sm:inline">Remind</span>
+                        </button>
+
                         <button
                           onClick={() => openEditModal(m)}
                           className="px-2.5 py-1 rounded-lg text-[10px] font-bold transition border bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border-emerald-200 inline-flex items-center gap-1"

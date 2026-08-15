@@ -16,6 +16,8 @@ import GymHeader from '../components/GymHeader';
 import MembershipCard from '../components/MembershipCard';
 import UpcomingRenewalCard from '../components/UpcomingRenewalCard';
 import CheckInButton from '../components/CheckInButton';
+import NotificationModal from '../components/NotificationModal';
+import NotificationService from '../services/NotificationService';
 import colors from '../constants/colors';
 import theme from '../constants/theme';
 
@@ -23,6 +25,8 @@ export const HomeScreen = ({ navigation }) => {
   const { user, isCheckedIn, checkInTime, toggleCheckIn, refreshProfile } = useAuth();
   const { showConfirm } = useDialog();
   const [refreshing, setRefreshing] = useState(false);
+  const [notifications, setNotifications] = useState([]);
+  const [notifModalVisible, setNotifModalVisible] = useState(false);
 
   const [attendanceStats, setAttendanceStats] = useState({
     checkInCount: 0,
@@ -32,7 +36,20 @@ export const HomeScreen = ({ navigation }) => {
 
   useEffect(() => {
     fetchDashboardStats();
+    fetchNotifications();
   }, [user?.id, isCheckedIn]);
+
+  const fetchNotifications = async () => {
+    try {
+      if (user) {
+        await NotificationService.evaluateFeeDeadlineNotification(user);
+      }
+      const list = await NotificationService.getNotifications();
+      setNotifications(list);
+    } catch (e) {
+      console.warn('Error fetching notifications:', e);
+    }
+  };
 
   const fetchDashboardStats = async () => {
     if (isSupabaseConfigured() && user?.id) {
@@ -179,6 +196,7 @@ export const HomeScreen = ({ navigation }) => {
           greeting={getGreeting()}
           userName={user?.name || user?.fullName || 'Abdullah'}
           userAvatar={user?.avatar}
+          onNotificationPress={() => setNotifModalVisible(true)}
         />
 
         {/* Membership Summary Card (Plan Description Section) */}
@@ -298,6 +316,18 @@ export const HomeScreen = ({ navigation }) => {
           <Text style={styles.quoteAuthor}>— ABDULLAH GYM 1</Text>
         </View>
       </ScrollView>
+
+      {/* Notification Center Modal */}
+      <NotificationModal
+        visible={notifModalVisible}
+        onClose={() => setNotifModalVisible(false)}
+        notifications={notifications}
+        onPayPress={() => navigation.navigate('Payments')}
+        onClearAll={async () => {
+          await NotificationService.clearAll();
+          setNotifications([]);
+        }}
+      />
     </SafeAreaView>
   );
 };

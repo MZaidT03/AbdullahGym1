@@ -12,37 +12,42 @@ export const UpcomingRenewalCard = ({
 }) => {
   const isDeactivated = status === 'Inactive' || status === 'Deactivated' || overdueDays > 7;
 
-  // 1. Active Period (>3 days remaining & 0 overdue): Keep dashboard clean by returning null
-  if (daysRemaining > 3 && overdueDays === 0 && !isDeactivated) {
+  // Active Period (>10 days remaining & 0 overdue): Keep dashboard clean
+  if (daysRemaining > 10 && overdueDays === 0 && !isDeactivated) {
     return null;
   }
 
-  // Determine Banner Variant: 'yellow' (amber), 'red' (danger), 'deactivated' (critical red), or 'info'
-  let variant = 'info';
-  let title = 'Upcoming Renewal';
-  let description = `Your membership expires in ${daysRemaining} day${daysRemaining === 1 ? '' : 's'}.`;
-  let iconName = 'time-outline';
+  // Determine Banner Variant: 'yellow' (amber), 'red' (danger), 'deactivated' (critical red), or 'emerald'
+  let variant = 'emerald';
+  let title = 'Renewal Window Open 🔔';
+  let description = `Your membership renewal is open (${daysRemaining} days remaining).`;
+  let iconName = 'notifications-outline';
 
   if (isDeactivated) {
     variant = 'deactivated';
-    title = 'Account Deactivated ❌';
-    description = '7-day grace period limit exceeded. Please renew your membership to reactivate check-in access.';
+    title = 'Account Expired ❌';
+    description = '7-day grace period exceeded. Please pay your fee to reactivate gym access.';
     iconName = 'close-circle-outline';
-  } else if (overdueDays >= 3 && overdueDays <= 7) {
+  } else if (overdueDays >= 4 && overdueDays <= 7) {
     variant = 'red';
-    title = 'Urgent Renewal Required 🚨';
-    description = `Membership overdue by ${overdueDays} day${overdueDays > 1 ? 's' : ''}. Account will be deactivated after 7 days!`;
+    title = 'Grace Period Ending 🚨';
+    description = `Day ${overdueDays} of 7 grace period. Account will be deactivated after day 7!`;
     iconName = 'warning-outline';
-  } else if (overdueDays >= 1 && overdueDays <= 2) {
+  } else if (overdueDays >= 1 && overdueDays <= 3) {
     variant = 'yellow';
-    title = 'Renewal Pending ⚠️';
-    description = `Month completed (Grace period: Day ${overdueDays} of 7). Please pay your monthly fee.`;
+    title = '7-Day Grace Period Active ⚠️';
+    description = `Month completed (Day ${overdueDays} of 7). Please submit your monthly renewal fee.`;
     iconName = 'alert-circle-outline';
   } else if (daysRemaining <= 3 && daysRemaining >= 0) {
-    variant = 'info';
-    title = 'Renewal Notice';
-    description = `Your membership month expires in ${daysRemaining} day${daysRemaining === 1 ? '' : 's'}.`;
-    iconName = 'information-circle-outline';
+    variant = 'yellow';
+    title = 'Expiring Soon ⏳';
+    description = `Your membership expires in ${daysRemaining} day${daysRemaining === 1 ? '' : 's'}. Renew now for uninterrupted access.`;
+    iconName = 'time-outline';
+  } else if (daysRemaining <= 10) {
+    variant = 'emerald';
+    title = 'Renewal Window Open 🔔';
+    description = `10-day renewal window is open (${daysRemaining} days left). Submit fee proof to renew for next cycle.`;
+    iconName = 'notifications-outline';
   }
 
   const getCardStyle = () => {
@@ -54,7 +59,7 @@ export const UpcomingRenewalCard = ({
       case 'deactivated':
         return styles.deactivatedCard;
       default:
-        return styles.infoCard;
+        return styles.emeraldCard;
     }
   };
 
@@ -67,7 +72,7 @@ export const UpcomingRenewalCard = ({
       case 'deactivated':
         return styles.deactivatedTitle;
       default:
-        return styles.infoTitle;
+        return styles.emeraldTitle;
     }
   };
 
@@ -80,7 +85,7 @@ export const UpcomingRenewalCard = ({
       case 'deactivated':
         return '#991B1B';
       default:
-        return '#3B82F6';
+        return colors.primaryDark;
     }
   };
 
@@ -94,7 +99,7 @@ export const UpcomingRenewalCard = ({
           <Text style={[styles.title, getTitleStyle()]}>{title}</Text>
           <TouchableOpacity onPress={onRenewPress} activeOpacity={0.7}>
             <Text style={styles.renewAction}>
-              {isDeactivated ? 'Reactivate' : 'Renew'}
+              {isDeactivated ? 'Reactivate' : 'Pay / Renew'}
             </Text>
           </TouchableOpacity>
         </View>
@@ -114,9 +119,9 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     ...theme.shadows.soft,
   },
-  infoCard: {
-    backgroundColor: '#EFF6FF',
-    borderColor: '#BFDBFE',
+  emeraldCard: {
+    backgroundColor: '#F0FDF4',
+    borderColor: '#DCFCE7',
   },
   yellowCard: {
     backgroundColor: '#FFFBEB',
@@ -145,10 +150,10 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: '800',
   },
-  infoTitle: {
-    color: '#1D4ED8',
+  emeraldTitle: {
+    color: colors.primaryDark,
   },
   yellowTitle: {
     color: '#B45309',
@@ -166,9 +171,10 @@ const styles = StyleSheet.create({
     textDecorationLine: 'underline',
   },
   description: {
-    fontSize: 13,
+    fontSize: 12,
     color: '#374151',
-    lineHeight: 18,
+    lineHeight: 17,
+    fontWeight: '500',
   },
 });
 

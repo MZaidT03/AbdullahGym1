@@ -1,6 +1,7 @@
 import React, { createContext, useState, useEffect, useContext } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import NotificationService from '../services/NotificationService';
 
 const LOCAL_STORAGE_KEY = '@abdullah_gym1_user';
 
@@ -134,40 +135,64 @@ export const AuthProvider = ({ children }) => {
       let overdueDays = 0;
       let effectiveStatus = isDbInactive ? (data?.status || 'Expired') : 'Active';
       let lastPaymentRecord = null;
+      let calculatedExpiryDate = null;
+      let calculatedRenewalOpenDate = null;
       const now = new Date();
 
       if (isSupabaseConfigured() && userId && !isDbInactive) {
         try {
-          const { data: latestPayment } = await supabase
+          const { data: userPayments } = await supabase
             .from('payments')
             .select('date, status, amount, total_fee')
             .eq('user_id', userId)
             .eq('status', 'Paid')
-            .order('date', { ascending: false })
-            .limit(1)
-            .maybeSingle();
+            .order('date', { ascending: true });
 
-          lastPaymentRecord = latestPayment;
+          if (userPayments && userPayments.length > 0) {
+            lastPaymentRecord = userPayments[userPayments.length - 1];
 
-          if (latestPayment && latestPayment.date) {
-            const payDate = new Date(latestPayment.date);
-            const expiryDate = new Date(payDate);
-            expiryDate.setDate(expiryDate.getDate() + 30);
+            // Stack consecutive 30-day payment cycles:
+            // If user renews early (e.g. 5 days before expiry), the new 30 days start after previous month completes!
+            let runningExpiry = null;
 
-            const diffMs = expiryDate.getTime() - now.getTime();
-            const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+            userPayments.forEach((pay) => {
+              if (!pay.date) return;
+              const payDate = new Date(pay.date);
 
-            if (diffDays >= 0) {
-              calculatedDays = diffDays;
-              overdueDays = 0;
-              effectiveStatus = 'Active';
-            } else {
-              calculatedDays = 0;
-              overdueDays = Math.abs(diffDays);
-              if (overdueDays > 7) {
-                effectiveStatus = 'Expired';
+              if (!runningExpiry) {
+                // First cycle
+                runningExpiry = new Date(payDate.getTime() + 30 * 86400000);
+              } else if (payDate <= runningExpiry) {
+                // Early renewal before expiry: add 30 days onto previous expiry date
+                runningExpiry = new Date(runningExpiry.getTime() + 30 * 86400000);
               } else {
-                effectiveStatus = 'Active'; // In 7-day grace period
+                // Late renewal after previous cycle already expired
+                runningExpiry = new Date(payDate.getTime() + 30 * 86400000);
+              }
+            });
+
+            if (runningExpiry) {
+              calculatedExpiryDate = runningExpiry.toISOString();
+
+              const renOpen = new Date(runningExpiry);
+              renOpen.setDate(renOpen.getDate() - 10);
+              calculatedRenewalOpenDate = renOpen.toISOString();
+
+              const diffMs = runningExpiry.getTime() - now.getTime();
+              const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+
+              if (diffDays >= 0) {
+                calculatedDays = diffDays;
+                overdueDays = 0;
+                effectiveStatus = 'Active';
+              } else {
+                calculatedDays = 0;
+                overdueDays = Math.abs(diffDays);
+                if (overdueDays > 7) {
+                  effectiveStatus = 'Expired';
+                } else {
+                  effectiveStatus = 'Active'; // In 7-day grace period
+                }
               }
             }
           } else {
@@ -232,6 +257,8 @@ export const AuthProvider = ({ children }) => {
         data?.monthly_fee || data?.fee || data?.price
       );
 
+      const isRenewalEligible = calculatedDays <= 10 || overdueDays > 0 || effectiveStatus !== 'Active';
+
       const userData = {
         id: userId,
         name: data?.full_name?.split(' ')[0] || userEmail?.split('@')[0] || 'Member',
@@ -245,12 +272,16 @@ export const AuthProvider = ({ children }) => {
         gender: data?.gender || 'Male',
         daysRemaining: calculatedDays,
         overdueDays: overdueDays,
+        expiryDate: calculatedExpiryDate,
+        renewalOpenDate: calculatedRenewalOpenDate,
+        isRenewalEligible: isRenewalEligible,
         status: effectiveStatus,
       };
 
       setUser(userData);
       setIsAuthenticated(true);
       await checkTodayStatus(userId);
+      NotificationService.evaluateFeeDeadlineNotification(userData).catch(() => {});
       return userData;
     } catch (err) {
       console.error('Error fetching profile from Supabase:', err);

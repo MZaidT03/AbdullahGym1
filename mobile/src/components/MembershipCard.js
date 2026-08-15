@@ -36,7 +36,8 @@ export const MembershipCard = ({
         <View style={styles.progressLabelRow}>
           <Text style={styles.progressLabel}>Plan Validity</Text>
           <Text style={styles.progressValue}>
-            <Text style={styles.daysHighlight}>{daysRemaining}</Text> / 30 Days Left
+            <Text style={styles.daysHighlight}>{daysRemaining}</Text>{' '}
+            {daysRemaining > 30 ? 'Days Left (Extended ✓)' : '/ 30 Days Left'}
           </Text>
         </View>
         <View style={styles.progressBarBg}>
