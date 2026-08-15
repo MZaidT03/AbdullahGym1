@@ -317,7 +317,21 @@ export default function PaymentsAdminPage() {
           .or(`user_id.eq.${targetUserId},id.eq.${targetMember.id}`);
 
         if (targetUserId) {
-          await supabase.from("profiles").update({ status: "Active" }).eq("id", targetUserId);
+          // Check if user had a scheduled upcoming plan to apply on payment renewal
+          const { data: userProf } = await supabase
+            .from("profiles")
+            .select("upcoming_plan, next_plan")
+            .eq("id", targetUserId)
+            .maybeSingle();
+
+          const profileUpdates = { status: "Active" };
+          if (userProf?.upcoming_plan || userProf?.next_plan) {
+            profileUpdates.plan = userProf.upcoming_plan || userProf.next_plan;
+            profileUpdates.upcoming_plan = null;
+            profileUpdates.next_plan = null;
+          }
+
+          await supabase.from("profiles").update(profileUpdates).eq("id", targetUserId);
         }
         await fetchPaymentsAndMembers();
       } catch (err) {

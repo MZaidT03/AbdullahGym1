@@ -34,8 +34,9 @@ function GenderBadge({ gender }) {
 
   return (
     <span
-      className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-[11px] font-bold border ${styles[currentGender] || styles.Male
-        }`}
+      className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-[11px] font-bold border ${
+        styles[currentGender] || styles.Male
+      }`}
     >
       <span>{icons[currentGender] || icons.Male}</span>
       <span>{gender || "Male"}</span>
@@ -47,14 +48,16 @@ function StatusBadge({ status }) {
   const isActive = status === "Active";
   return (
     <span
-      className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${isActive
+      className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
+        isActive
           ? "bg-emerald-50 text-emerald-700 border-emerald-200/80"
           : "bg-rose-50 text-rose-700 border-rose-200/80"
-        }`}
+      }`}
     >
       <span
-        className={`w-1.5 h-1.5 rounded-full ${isActive ? "bg-emerald-500 animate-pulse" : "bg-rose-500"
-          }`}
+        className={`w-1.5 h-1.5 rounded-full ${
+          isActive ? "bg-emerald-500 animate-pulse" : "bg-rose-500"
+        }`}
       />
       {status || "Active"}
     </span>
@@ -89,6 +92,20 @@ export default function MembersPage() {
   const [availablePlans, setAvailablePlans] = useState([]);
   const [availableAddons, setAvailableAddons] = useState([]);
   const [selectedAddonIds, setSelectedAddonIds] = useState([]);
+
+  // Edit / Plan Change Modal State
+  const [editingMember, setEditingMember] = useState(null);
+  const [editFullName, setEditFullName] = useState("");
+  const [editPhone, setEditPhone] = useState("");
+  const [editGender, setEditGender] = useState("Male");
+  const [editStatus, setEditStatus] = useState("Active");
+  const [editPlan, setEditPlan] = useState("Pro Membership (PKR 5,000/mo)");
+  const [editAddonIds, setEditAddonIds] = useState([]);
+  const [editTiming, setEditTiming] = useState("NEXT_CYCLE"); // 'NEXT_CYCLE' | 'IMMEDIATE'
+  const [editBaseFee, setEditBaseFee] = useState(5000);
+  const [editTotalFee, setEditTotalFee] = useState("5000");
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState("");
 
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState("");
@@ -188,10 +205,19 @@ export default function MembersPage() {
           );
 
           const evaluated = registeredOnly.map((p) => {
+            let activePlan = p.plan || "Pro Membership";
+            let upcomingPlan = p.upcoming_plan || null;
+
+            if (!upcomingPlan && activePlan.includes(" [Next: ")) {
+              const parts = activePlan.split(" [Next: ");
+              activePlan = parts[0];
+              upcomingPlan = parts[1].replace(/\]$/, "");
+            }
+
             const userPays = payData
               ? payData.filter(
-                (pay) => pay.user_id === p.id && (pay.status === "Paid" || pay.status === "Partial")
-              )
+                  (pay) => pay.user_id === p.id && (pay.status === "Paid" || pay.status === "Partial")
+                )
               : [];
             const createdAt = p.created_at ? new Date(p.created_at) : null;
             const now = new Date();
@@ -199,9 +225,13 @@ export default function MembersPage() {
 
             if (daysDiff > 7 && userPays.length === 0) {
               p.status = "Deactivated";
-              supabase.from("profiles").update({ status: "Deactivated" }).eq("id", p.id).then(() => { });
+              supabase.from("profiles").update({ status: "Deactivated" }).eq("id", p.id).then(() => {});
             }
-            return p;
+            return {
+              ...p,
+              plan: activePlan,
+              upcoming_plan: upcomingPlan,
+            };
           });
 
           setMembers(evaluated);
@@ -215,7 +245,7 @@ export default function MembersPage() {
     setLoading(false);
   };
 
-  const updateFeeCalculation = (selectedPlanStr, addonIdList) => {
+  const computePlanFee = (selectedPlanStr, addonIdList) => {
     let b = 5000;
     const foundPlan = availablePlans.find((p) => selectedPlanStr.includes(p.name));
     if (foundPlan) {
@@ -229,14 +259,25 @@ export default function MembersPage() {
     } else if (selectedPlanStr.includes("500") || selectedPlanStr.includes("Daily")) {
       b = 500;
     }
-    setBaseFee(b);
 
     const addonsSum = addonIdList.reduce((acc, id) => {
       const matched = availableAddons.find((a) => a.id === id);
       return acc + (matched ? Number(matched.price || 0) : 0);
     }, 0);
 
-    setNewFeePaid(String(b + addonsSum));
+    return { baseFee: b, totalFee: b + addonsSum };
+  };
+
+  const updateFeeCalculation = (selectedPlanStr, addonIdList) => {
+    const { baseFee: b, totalFee: t } = computePlanFee(selectedPlanStr, addonIdList);
+    setBaseFee(b);
+    setNewFeePaid(String(t));
+  };
+
+  const updateEditFeeCalculation = (selectedPlanStr, addonIdList) => {
+    const { baseFee: b, totalFee: t } = computePlanFee(selectedPlanStr, addonIdList);
+    setEditBaseFee(b);
+    setEditTotalFee(String(t));
   };
 
   const handleToggleAddonCheck = (addonId) => {
@@ -246,6 +287,180 @@ export default function MembersPage() {
 
     setSelectedAddonIds(updated);
     updateFeeCalculation(newPlan, updated);
+  };
+
+  const handleToggleEditAddonCheck = (addonId) => {
+    const updated = editAddonIds.includes(addonId)
+      ? editAddonIds.filter((id) => id !== addonId)
+      : [...editAddonIds, addonId];
+
+    setEditAddonIds(updated);
+    updateEditFeeCalculation(editPlan, updated);
+  };
+
+  // Open Edit / Plan Change Modal
+  const openEditModal = (member) => {
+    setEditingMember(member);
+    setEditFullName(member.full_name || "");
+    setEditPhone(member.phone || "");
+    setEditGender(member.gender || "Male");
+    setEditStatus(member.status || "Active");
+    setEditError("");
+    setEditTiming("NEXT_CYCLE");
+
+    // Detect base plan from member plan string or upcoming_plan
+    const currentPlanStr = member.upcoming_plan || member.plan || "Pro Membership (PKR 5,000/mo)";
+    let matchedBasePlan = "Pro Membership (PKR 5,000/mo)";
+
+    if (currentPlanStr.includes("Pro Plus")) {
+      matchedBasePlan = "Pro Plus Membership (PKR 12,000/mo)";
+    } else if (currentPlanStr.includes("VIP") || currentPlanStr.includes("Champion")) {
+      matchedBasePlan = "VIP Champion Pass (PKR 9,000/mo)";
+    } else if (currentPlanStr.includes("Standard")) {
+      matchedBasePlan = "Standard Monthly Pass (PKR 3,500/mo)";
+    } else if (currentPlanStr.includes("Daily") || currentPlanStr.includes("Visitor")) {
+      matchedBasePlan = "Daily Visitor Pass (PKR 500/day)";
+    }
+
+    setEditPlan(matchedBasePlan);
+
+    // Detect active addon IDs in member plan string
+    const detectedAddons = [];
+    availableAddons.forEach((a) => {
+      if (currentPlanStr.includes(a.name)) {
+        detectedAddons.push(a.id);
+      }
+    });
+    setEditAddonIds(detectedAddons);
+
+    const { baseFee: b, totalFee: t } = computePlanFee(matchedBasePlan, detectedAddons);
+    setEditBaseFee(b);
+    setEditTotalFee(String(t));
+  };
+
+  // Save Plan Change / Upgrade / Downgrade
+  const handleSaveMemberPlan = async (e) => {
+    e.preventDefault();
+    if (!editingMember) return;
+    setEditError("");
+    setEditSaving(true);
+
+    let finalPlanLabel = editPlan;
+    const selectedAddonObjs = availableAddons.filter((a) => editAddonIds.includes(a.id));
+    if (selectedAddonObjs.length > 0) {
+      const addonTitles = selectedAddonObjs.map(
+        (a) => `${a.name} (+PKR ${Number(a.price).toLocaleString()})`
+      );
+      finalPlanLabel = `${editPlan} [Add-ons: ${addonTitles.join(" + ")}]`;
+    }
+
+    try {
+      const baseUpdates = {
+        full_name: editFullName.trim() || editingMember.full_name,
+        gender: editGender,
+        status: editStatus,
+      };
+
+      if (editTiming === "NEXT_CYCLE") {
+        baseUpdates.upcoming_plan = finalPlanLabel;
+      } else {
+        baseUpdates.plan = finalPlanLabel;
+        baseUpdates.upcoming_plan = null;
+      }
+
+      if (isSupabaseConfigured()) {
+        const { error } = await supabase
+          .from("profiles")
+          .update(baseUpdates)
+          .eq("id", editingMember.id);
+
+        if (error) {
+          // If upcoming_plan column doesn't exist in Supabase schema, fallback safely without crashing
+          if (error.code === "PGRST204" || error.message.includes("upcoming_plan")) {
+            const fallbackUpdates = {
+              full_name: editFullName.trim() || editingMember.full_name,
+              gender: editGender,
+              status: editStatus,
+            };
+            if (editTiming === "IMMEDIATE") {
+              fallbackUpdates.plan = finalPlanLabel;
+            } else {
+              const currentCleanPlan = (editingMember.plan || "Pro Membership").split(" [Next:")[0];
+              fallbackUpdates.plan = `${currentCleanPlan} [Next: ${finalPlanLabel}]`;
+            }
+
+            const { error: fbErr } = await supabase
+              .from("profiles")
+              .update(fallbackUpdates)
+              .eq("id", editingMember.id);
+
+            if (fbErr) throw fbErr;
+          } else {
+            throw error;
+          }
+        }
+      }
+
+      // Update local state immediately
+      setMembers((prev) =>
+        prev.map((m) =>
+          m.id === editingMember.id
+            ? {
+                ...m,
+                full_name: editFullName.trim() || m.full_name,
+                gender: editGender,
+                status: editStatus,
+                plan: editTiming === "IMMEDIATE" ? finalPlanLabel : m.plan,
+                upcoming_plan: editTiming === "NEXT_CYCLE" ? finalPlanLabel : null,
+              }
+            : m
+        )
+      );
+
+      setStatusMsg(
+        editTiming === "NEXT_CYCLE"
+          ? `✓ Plan change scheduled for next billing cycle for ${editingMember.full_name}.`
+          : `✓ Plan & Add-ons updated immediately for ${editingMember.full_name}.`
+      );
+
+      setEditingMember(null);
+      await fetchMembers();
+    } catch (err) {
+      console.error("Save plan change error:", err);
+      setEditError(err.message || "Failed to update member plan.");
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
+  // Cancel scheduled upcoming plan
+  const handleCancelUpcomingPlan = async (memberId) => {
+    try {
+      if (isSupabaseConfigured()) {
+        const { error } = await supabase
+          .from("profiles")
+          .update({ upcoming_plan: null })
+          .eq("id", memberId);
+
+        if (error && (error.code === "PGRST204" || error.message.includes("upcoming_plan"))) {
+          const currentMem = members.find((m) => m.id === memberId);
+          if (currentMem?.plan && currentMem.plan.includes(" [Next:")) {
+            const cleanPlan = currentMem.plan.split(" [Next:")[0];
+            await supabase.from("profiles").update({ plan: cleanPlan }).eq("id", memberId);
+          }
+        }
+      }
+
+      setMembers((prev) =>
+        prev.map((m) => (m.id === memberId ? { ...m, upcoming_plan: null } : m))
+      );
+      if (editingMember?.id === memberId) {
+        setEditingMember((prev) => ({ ...prev, upcoming_plan: null }));
+      }
+      setStatusMsg("✓ Scheduled plan change cancelled. Member will remain on current plan.");
+    } catch (err) {
+      console.error("Error cancelling upcoming plan:", err);
+    }
   };
 
   const handleAddMember = async (e) => {
@@ -361,192 +576,98 @@ export default function MembersPage() {
       const matchesSearch =
         m.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         m.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        m.member_id?.toLowerCase().includes(searchTerm.toLowerCase());
+        m.member_id?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        m.plan?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        m.upcoming_plan?.toLowerCase().includes(searchTerm.toLowerCase());
 
-      const matchesStatus = statusFilter === "All" || m.status === statusFilter;
-      const matchesGender = genderFilter === "All" || (m.gender || "Male") === genderFilter;
+      const matchesStatus =
+        statusFilter === "All" ||
+        (statusFilter === "Active" && m.status === "Active") ||
+        (statusFilter === "Expired" && m.status !== "Active") ||
+        (statusFilter === "Upcoming Plan" && Boolean(m.upcoming_plan));
+
+      const matchesGender = genderFilter === "All" || m.gender === genderFilter;
 
       return matchesSearch && matchesStatus && matchesGender;
     });
   }, [members, searchTerm, statusFilter, genderFilter]);
 
-  const stats = useMemo(() => {
-    const activeCount = members.filter((m) => m.status === "Active").length;
-    return {
-      total: members.length,
-      active: activeCount,
-      expired: members.length - activeCount,
-    };
-  }, [members]);
-
   return (
-    <div className="space-y-6 font-sans p-2 sm:p-4 text-slate-800">
+    <div className="space-y-6">
       {/* HEADER SECTION */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white border border-slate-200/80 p-5 rounded-2xl shadow-xs">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900 tracking-tight">
-              Members Directory
-            </h1>
-            <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
-              {stats.total} Total
-            </span>
-          </div>
+          <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
+            Members & Membership Plans
+          </h1>
           <p className="text-xs text-slate-500 mt-1">
-            Manage profiles, register new registrations, assign add-ons, and issue access.
+            Manage registered gym members, active plans, add-ons & upcoming cycle plan changes.
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
-          <div className="hidden sm:flex items-center gap-3 px-3 py-1.5 bg-slate-50 border border-slate-200/80 rounded-xl text-xs">
-            <span className="text-emerald-700 font-bold">{stats.active} Active</span>
-            <span className="text-slate-300">•</span>
-            <span className="text-slate-500 font-medium">{stats.expired} Inactive</span>
-          </div>
-
-          <button
-            onClick={() => {
-              setFormError("");
-              setSuccessCard(null);
-              setIsModalOpen(true);
-            }}
-            className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition-all duration-150 shadow-xs hover:scale-[1.02] flex items-center gap-2"
-          >
-            <span className="text-base font-normal">＋</span>
-            <span>Register Member</span>
-          </button>
-        </div>
+        <button
+          onClick={() => setIsModalOpen(true)}
+          className="inline-flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow-md shadow-emerald-600/20 transition-all active:scale-95"
+        >
+          <span>＋</span>
+          <span>Register New Member</span>
+        </button>
       </div>
 
-      {/* STATUS BANNER */}
-      {statusMsg && (
-        <div className="p-4 bg-emerald-50 border border-emerald-200/80 text-emerald-800 text-xs font-semibold rounded-2xl flex items-center justify-between shadow-xs">
+      {statusMsg ? (
+        <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold rounded-xl flex items-center justify-between">
           <span>{statusMsg}</span>
-          <button
-            onClick={() => setStatusMsg("")}
-            className="text-slate-400 hover:text-slate-700 font-bold text-xs p-1 rounded-lg"
-          >
+          <button onClick={() => setStatusMsg("")} className="text-emerald-600 font-bold ml-2">
             ✕
           </button>
         </div>
-      )}
+      ) : null}
 
-      {/* SUCCESS CREDENTIALS BANNER */}
-      {successCard && (
-        <div className="bg-emerald-50/80 border border-emerald-200 rounded-2xl p-5 shadow-xs space-y-3 relative">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2.5">
-              <span className="w-8 h-8 rounded-full bg-emerald-600 text-white flex items-center justify-center font-bold text-sm shadow-xs">
-                ✓
-              </span>
-              <div>
-                <h3 className="font-bold text-sm text-emerald-950">
-                  Member Profile Created Successfully
-                </h3>
-                <p className="text-xs text-emerald-700">
-                  Pass these login credentials to the member for mobile access.
-                </p>
-              </div>
-            </div>
-            <button
-              onClick={() => setSuccessCard(null)}
-              className="text-slate-400 hover:text-slate-700 font-bold text-xs p-1 rounded-lg"
-            >
-              ✕
-            </button>
-          </div>
-
-          <div className="grid grid-cols-2 sm:grid-cols-6 gap-3 bg-white p-4 rounded-xl border border-emerald-200/80 text-xs">
-            <div>
-              <span className="text-[10px] text-slate-400 uppercase font-bold">Member</span>
-              <p className="font-bold text-slate-900 truncate">{successCard.name}</p>
-            </div>
-            <div>
-              <span className="text-[10px] text-slate-400 uppercase font-bold">Gender</span>
-              <p className="font-semibold text-slate-700">{successCard.gender}</p>
-            </div>
-            <div>
-              <span className="text-[10px] text-slate-400 uppercase font-bold">ID</span>
-              <p className="font-mono font-bold text-emerald-700">{successCard.memberId}</p>
-            </div>
-            <div>
-              <span className="text-[10px] text-slate-400 uppercase font-bold">Payment Method</span>
-              <p className="font-semibold text-slate-800">{successCard.paymentMethod || "Cash / Desk"}</p>
-            </div>
-            <div>
-              <span className="text-[10px] text-slate-400 uppercase font-bold">Fee Paid</span>
-              <p className="font-mono font-bold text-emerald-800">
-                PKR {Number(successCard.feePaid).toLocaleString()}
-              </p>
-            </div>
-            <div>
-              <span className="text-[10px] text-slate-400 uppercase font-bold">App Password</span>
-              <p className="font-mono font-bold text-emerald-800 bg-emerald-100/60 px-2 py-0.5 rounded border border-emerald-200 inline-block">
-                {successCard.password}
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* FILTER TOOLBAR */}
-      <div className="bg-white border border-slate-200/80 p-4 rounded-2xl shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
-        {/* Search */}
-        <div className="relative w-full md:w-80">
-          <input
-            type="text"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="Search by name, email, or ID..."
-            className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-4 py-2 text-xs text-slate-900 focus:outline-none focus:border-emerald-500 focus:bg-white transition-all"
-          />
-          <svg
-            className="w-4 h-4 text-slate-400 absolute left-3 top-2.5"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+      {/* FILTER & SEARCH TOOLBAR */}
+      <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-xs space-y-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {/* Search Input */}
+          <div className="relative">
+            <input
+              type="text"
+              placeholder="Search by name, email, member ID, plan..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-3.5 py-2 text-xs text-slate-900 focus:outline-none focus:border-emerald-500 focus:bg-white"
             />
-          </svg>
-        </div>
+            <span className="absolute left-3 top-2.5 text-slate-400 text-xs">🔍</span>
+          </div>
 
-        {/* Filters */}
-        <div className="flex flex-wrap items-center gap-3">
-          {/* Gender Filter */}
-          <div className="flex items-center gap-1 bg-slate-100/80 p-1 rounded-xl border border-slate-200/60 text-xs">
-            <span className="text-[10px] font-bold text-slate-400 px-1 uppercase">Gender</span>
-            {["All", "Male", "Female", "Other"].map((gen) => (
+          {/* Status Filter */}
+          <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200/60">
+            {["All", "Active", "Expired", "Upcoming Plan"].map((st) => (
               <button
-                key={gen}
-                onClick={() => setGenderFilter(gen)}
-                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${genderFilter === gen
+                key={st}
+                onClick={() => setStatusFilter(st)}
+                className={`flex-1 py-1 text-[11px] font-bold rounded-lg transition-all ${
+                  statusFilter === st
                     ? "bg-white text-slate-900 shadow-xs"
-                    : "text-slate-600 hover:text-slate-900"
-                  }`}
+                    : "text-slate-500 hover:text-slate-800"
+                }`}
               >
-                {gen}
+                {st}
               </button>
             ))}
           </div>
 
-          {/* Status Filter */}
-          <div className="flex items-center gap-1 bg-slate-100/80 p-1 rounded-xl border border-slate-200/60 text-xs">
-            <span className="text-[10px] font-bold text-slate-400 px-1 uppercase">Status</span>
-            {["All", "Active", "Expired"].map((st) => (
+          {/* Gender Filter */}
+          <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200/60">
+            {["All", "Male", "Female", "Other"].map((g) => (
               <button
-                key={st}
-                onClick={() => setStatusFilter(st)}
-                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${statusFilter === st
-                    ? "bg-slate-900 text-white shadow-xs"
-                    : "text-slate-600 hover:text-slate-900"
-                  }`}
+                key={g}
+                onClick={() => setGenderFilter(g)}
+                className={`flex-1 py-1 text-[11px] font-bold rounded-lg transition-all ${
+                  genderFilter === g
+                    ? "bg-white text-slate-900 shadow-xs"
+                    : "text-slate-500 hover:text-slate-800"
+                }`}
               >
-                {st}
+                {g}
               </button>
             ))}
           </div>
@@ -565,7 +686,7 @@ export default function MembersPage() {
                 <th className="py-3 px-3.5">Plan & Add-Ons</th>
                 <th className="py-3 px-3.5">Fee Paid</th>
                 <th className="py-3 px-3.5">Status</th>
-                <th className="py-3 px-3.5 text-right">Action</th>
+                <th className="py-3 px-3.5 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs">
@@ -602,8 +723,18 @@ export default function MembersPage() {
                       {m.member_id || "GP-MEMBER"}
                     </td>
 
-                    <td className="py-3.5 px-3.5 text-slate-600 font-medium max-w-xs truncate">
-                      {m.plan || "Pro Membership"}
+                    <td className="py-3.5 px-3.5 text-slate-700 font-medium max-w-sm">
+                      <div className="space-y-1">
+                        <p className="font-semibold text-slate-900">{m.plan || "Pro Membership"}</p>
+                        {m.upcoming_plan ? (
+                          <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200">
+                            <span>⏳ Next Cycle:</span>
+                            <span className="font-medium truncate max-w-[180px]">
+                              {m.upcoming_plan}
+                            </span>
+                          </div>
+                        ) : null}
+                      </div>
                     </td>
 
                     <td className="py-3.5 px-3.5 font-mono font-bold text-slate-900">
@@ -615,15 +746,27 @@ export default function MembersPage() {
                     </td>
 
                     <td className="py-3.5 px-3.5 text-right">
-                      <button
-                        onClick={() => handleToggleStatus(m.id, m.status || "Active")}
-                        className={`px-3 py-1 rounded-lg text-[10px] font-bold transition border ${m.status === "Active"
-                            ? "bg-slate-100 text-slate-600 hover:text-slate-900 border-slate-200"
-                            : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border-emerald-200"
+                      <div className="flex items-center justify-end gap-1.5">
+                        <button
+                          onClick={() => openEditModal(m)}
+                          className="px-2.5 py-1 rounded-lg text-[10px] font-bold transition border bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border-emerald-200 inline-flex items-center gap-1"
+                          title="Change Plan, Add-ons or Schedule for Next Cycle"
+                        >
+                          <span>⚙️</span>
+                          <span>Manage Plan</span>
+                        </button>
+
+                        <button
+                          onClick={() => handleToggleStatus(m.id, m.status || "Active")}
+                          className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition border ${
+                            m.status === "Active"
+                              ? "bg-slate-100 text-slate-600 hover:text-slate-900 border-slate-200"
+                              : "bg-teal-50 text-teal-700 hover:bg-teal-100 border-teal-200"
                           }`}
-                      >
-                        {m.status === "Active" ? "Deactivate" : "Reactivate"}
-                      </button>
+                        >
+                          {m.status === "Active" ? "Deactivate" : "Reactivate"}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -632,6 +775,325 @@ export default function MembersPage() {
           </table>
         </div>
       </div>
+
+      {/* EDIT / MANAGE PLAN & ADD-ONS MODAL */}
+      {editingMember && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+          <div className="bg-white border border-slate-200 rounded-3xl max-w-xl w-full p-6 space-y-5 shadow-2xl text-slate-800 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-3">
+                <MemberAvatar name={editingMember.full_name} />
+                <div>
+                  <h3 className="text-base font-extrabold text-slate-900">
+                    Manage Plan & Add-ons
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    {editingMember.full_name} • <span className="font-mono text-emerald-700 font-bold">{editingMember.member_id}</span>
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setEditingMember(null)}
+                className="text-slate-400 hover:text-slate-700 font-bold text-sm p-1.5 rounded-lg"
+              >
+                ✕
+              </button>
+            </div>
+
+            {editError && (
+              <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold rounded-xl">
+                ⚠️ {editError}
+              </div>
+            )}
+
+            {/* Current Active Plan Card */}
+            <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-2">
+              <div className="flex justify-between items-center">
+                <span className="text-[11px] font-bold text-slate-400 uppercase">
+                  Current Active Plan
+                </span>
+                <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                  Active Now
+                </span>
+              </div>
+              <p className="text-xs font-extrabold text-slate-900">{editingMember.plan || "Pro Membership"}</p>
+
+              {editingMember.upcoming_plan ? (
+                <div className="mt-2 p-2.5 bg-amber-50/80 border border-amber-200 rounded-xl space-y-1">
+                  <div className="flex justify-between items-center">
+                    <span className="text-[11px] font-bold text-amber-900 flex items-center gap-1">
+                      <span>⏳</span> Scheduled for Next Cycle:
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleCancelUpcomingPlan(editingMember.id)}
+                      className="text-[10px] font-bold text-rose-600 hover:underline"
+                    >
+                      Cancel Scheduled Change
+                    </button>
+                  </div>
+                  <p className="text-xs font-semibold text-amber-800">{editingMember.upcoming_plan}</p>
+                </div>
+              ) : null}
+            </div>
+
+            <form onSubmit={handleSaveMemberPlan} className="space-y-4">
+              {/* Select Target Plan */}
+              <div>
+                <label className="block text-[11px] font-bold text-slate-600 uppercase mb-1">
+                  Target Membership Tier *
+                </label>
+                <select
+                  value={editPlan}
+                  onChange={(e) => {
+                    const selectedVal = e.target.value;
+                    setEditPlan(selectedVal);
+                    updateEditFeeCalculation(selectedVal, editAddonIds);
+                  }}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs text-slate-900 font-bold focus:outline-none focus:border-emerald-500 focus:bg-white"
+                >
+                  {availablePlans.length > 0 ? (
+                    availablePlans.map((p) => {
+                      const mPrice = p.monthly_price ?? p.monthlyPrice ?? 0;
+                      const dPrice = p.daily_price ?? p.dailyPrice ?? 0;
+                      const label =
+                        mPrice > 0
+                          ? `${p.name} (PKR ${Number(mPrice).toLocaleString()}/mo)`
+                          : `${p.name} (PKR ${Number(dPrice).toLocaleString()}/day)`;
+                      return (
+                        <option key={p.id} value={label}>
+                          {label}
+                        </option>
+                      );
+                    })
+                  ) : (
+                    <>
+                      <option value="Pro Membership (PKR 5,000/mo)">
+                        Pro Membership (PKR 5,000/mo)
+                      </option>
+                      <option value="Pro Plus Membership (PKR 12,000/mo)">
+                        Pro Plus Membership (PKR 12,000/mo)
+                      </option>
+                      <option value="Standard Monthly Pass (PKR 3,500/mo)">
+                        Standard Monthly Pass (PKR 3,500/mo)
+                      </option>
+                      <option value="VIP Champion Pass (PKR 9,000/mo)">
+                        VIP Champion Pass (PKR 9,000/mo)
+                      </option>
+                    </>
+                  )}
+                </select>
+              </div>
+
+              {/* Stackable Add-On Options */}
+              <div className="p-3.5 bg-slate-50/80 border border-slate-200/80 rounded-2xl space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wide">
+                    Stackable Add-On Passes
+                  </span>
+                  <span className="text-[10px] text-emerald-700 font-semibold bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                    Optional
+                  </span>
+                </div>
+
+                <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                  {availableAddons.map((addon) => {
+                    const isChecked = editAddonIds.includes(addon.id);
+                    return (
+                      <label
+                        key={addon.id}
+                        className={`flex items-center gap-2.5 p-2 bg-white border rounded-xl cursor-pointer transition-all ${
+                          isChecked
+                            ? "border-emerald-500/80 ring-1 ring-emerald-500/20"
+                            : "border-slate-200/80 hover:border-slate-300"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => handleToggleEditAddonCheck(addon.id)}
+                          className="w-4 h-4 text-emerald-600 rounded focus:ring-emerald-500"
+                        />
+                        <div className="flex-1 flex items-center justify-between text-xs">
+                          <span className="font-semibold text-slate-800 flex items-center gap-1.5">
+                            <span>{addon.icon || "🏃"}</span>
+                            {addon.name}
+                          </span>
+                          <span className="font-mono text-emerald-700 font-bold">
+                            +PKR {Number(addon.price || 0).toLocaleString()}
+                          </span>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Implementation Timing Choice (Next Cycle vs Immediate) */}
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1.5">
+                  When Should This Change Take Effect? *
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <label
+                    className={`p-3 rounded-2xl border cursor-pointer transition-all flex flex-col justify-between ${
+                      editTiming === "NEXT_CYCLE"
+                        ? "bg-amber-50/80 border-amber-400 ring-1 ring-amber-400/30"
+                        : "bg-slate-50 border-slate-200 hover:border-slate-300"
+                    }`}
+                  >
+                    <div className="flex items-start gap-2.5">
+                      <input
+                        type="radio"
+                        name="editTiming"
+                        value="NEXT_CYCLE"
+                        checked={editTiming === "NEXT_CYCLE"}
+                        onChange={() => setEditTiming("NEXT_CYCLE")}
+                        className="mt-0.5 text-amber-600 focus:ring-amber-500"
+                      />
+                      <div>
+                        <p className="text-xs font-bold text-slate-900">
+                          🗓️ Next Payment Cycle
+                        </p>
+                        <p className="text-[10px] text-slate-500 mt-0.5 leading-snug">
+                          Member continues current plan this month. New plan and fee apply on next renewal payment.
+                        </p>
+                      </div>
+                    </div>
+                    <span className="text-[9px] font-bold text-amber-800 bg-amber-100/80 px-2 py-0.5 rounded mt-2 self-start">
+                      Recommended
+                    </span>
+                  </label>
+
+                  <label
+                    className={`p-3 rounded-2xl border cursor-pointer transition-all flex flex-col justify-between ${
+                      editTiming === "IMMEDIATE"
+                        ? "bg-emerald-50/80 border-emerald-400 ring-1 ring-emerald-400/30"
+                        : "bg-slate-50 border-slate-200 hover:border-slate-300"
+                    }`}
+                  >
+                    <div className="flex items-start gap-2.5">
+                      <input
+                        type="radio"
+                        name="editTiming"
+                        value="IMMEDIATE"
+                        checked={editTiming === "IMMEDIATE"}
+                        onChange={() => setEditTiming("IMMEDIATE")}
+                        className="mt-0.5 text-emerald-600 focus:ring-emerald-500"
+                      />
+                      <div>
+                        <p className="text-xs font-bold text-slate-900">
+                          ⚡ Apply Immediately
+                        </p>
+                        <p className="text-[10px] text-slate-500 mt-0.5 leading-snug">
+                          Instantly overwrites active membership plan and fee effective today.
+                        </p>
+                      </div>
+                    </div>
+                    <span className="text-[9px] font-bold text-emerald-800 bg-emerald-100/80 px-2 py-0.5 rounded mt-2 self-start">
+                      Immediate Effect
+                    </span>
+                  </label>
+                </div>
+              </div>
+
+              {/* Total Calculation Preview */}
+              <div className="p-3 bg-slate-900 text-white rounded-xl text-xs space-y-1">
+                <div className="flex justify-between items-center text-slate-400">
+                  <span>Base Fee:</span>
+                  <span className="font-mono">PKR {Number(editBaseFee).toLocaleString()}</span>
+                </div>
+                {editAddonIds.length > 0 && (
+                  <div className="flex justify-between items-center text-emerald-400">
+                    <span>Add-ons Total ({editAddonIds.length}):</span>
+                    <span className="font-mono">
+                      +PKR{" "}
+                      {Number(
+                        editAddonIds.reduce((acc, id) => {
+                          const m = availableAddons.find((a) => a.id === id);
+                          return acc + (m ? Number(m.price || 0) : 0);
+                        }, 0)
+                      ).toLocaleString()}
+                    </span>
+                  </div>
+                )}
+                <div className="flex justify-between items-center pt-1.5 border-t border-slate-800 font-bold text-sm">
+                  <span>New Monthly Subscription Fee:</span>
+                  <span className="font-mono text-emerald-400 text-base">
+                    PKR {Number(editTotalFee).toLocaleString()}
+                  </span>
+                </div>
+              </div>
+
+              {/* Member Profile Quick Edits */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-slate-100">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">
+                    Full Name
+                  </label>
+                  <input
+                    type="text"
+                    value={editFullName}
+                    onChange={(e) => setEditFullName(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">
+                    Gender
+                  </label>
+                  <select
+                    value={editGender}
+                    onChange={(e) => setEditGender(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-emerald-500"
+                  >
+                    <option value="Male">♂ Male</option>
+                    <option value="Female">♀ Female</option>
+                    <option value="Other">⚧ Other</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">
+                    Account Status
+                  </label>
+                  <select
+                    value={editStatus}
+                    onChange={(e) => setEditStatus(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-emerald-500"
+                  >
+                    <option value="Active">🟢 Active</option>
+                    <option value="Expired">🔴 Expired</option>
+                    <option value="Deactivated">⚪ Deactivated</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setEditingMember(null)}
+                  className="text-xs text-slate-500 hover:text-slate-800 px-4 py-2 rounded-xl font-semibold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={editSaving}
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-5 py-2.5 rounded-xl transition-all shadow-xs"
+                >
+                  {editSaving
+                    ? "Saving Changes..."
+                    : editTiming === "NEXT_CYCLE"
+                    ? "Schedule for Next Cycle"
+                    : "Apply Changes Immediately"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* REGISTER MEMBER MODAL */}
       {isModalOpen && (
@@ -688,10 +1150,11 @@ export default function MembersPage() {
                         key={g.id}
                         type="button"
                         onClick={() => setNewGender(g.id)}
-                        className={`py-1 rounded-lg text-xs font-bold transition text-center ${newGender === g.id
+                        className={`py-1 rounded-lg text-xs font-bold transition text-center ${
+                          newGender === g.id
                             ? "bg-white text-slate-900 shadow-xs"
                             : "text-slate-500 hover:text-slate-800"
-                          }`}
+                        }`}
                       >
                         {g.label}
                       </button>
@@ -794,10 +1257,11 @@ export default function MembersPage() {
                     return (
                       <label
                         key={addon.id}
-                        className={`flex items-center gap-2.5 p-2 bg-white border rounded-xl cursor-pointer transition-all ${isChecked
+                        className={`flex items-center gap-2.5 p-2 bg-white border rounded-xl cursor-pointer transition-all ${
+                          isChecked
                             ? "border-emerald-500/80 ring-1 ring-emerald-500/20"
                             : "border-slate-200/80 hover:border-slate-300"
-                          }`}
+                        }`}
                       >
                         <input
                           type="checkbox"
@@ -901,10 +1365,63 @@ export default function MembersPage() {
         </div>
       )}
 
+      {/* SUCCESS MODAL */}
+      {successCard && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+          <div className="bg-white border border-slate-200 rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl text-slate-800">
+            <div className="w-12 h-12 bg-emerald-100 text-emerald-700 rounded-2xl flex items-center justify-center text-2xl mx-auto shadow-xs">
+              ✓
+            </div>
+            <div className="text-center">
+              <h3 className="text-base font-extrabold text-slate-900">Member Registered!</h3>
+              <p className="text-xs text-slate-500 mt-0.5">Account has been activated with login pass.</p>
+            </div>
+
+            <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-4 space-y-2 text-xs">
+              <div className="flex justify-between">
+                <span className="text-slate-500">Member Name:</span>
+                <span className="font-bold text-slate-900">{successCard.name}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Member ID:</span>
+                <span className="font-mono font-bold text-emerald-700">{successCard.memberId}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Plan Assigned:</span>
+                <span className="font-bold text-slate-900">{successCard.plan}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Fee Received:</span>
+                <span className="font-mono font-bold text-slate-900">PKR {Number(successCard.feePaid).toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Payment Method:</span>
+                <span className="font-bold text-slate-700">{successCard.paymentMethod}</span>
+              </div>
+              <div className="flex justify-between pt-2 border-t border-slate-200">
+                <span className="text-slate-500">Login Email:</span>
+                <span className="font-mono font-bold text-slate-900">{successCard.email}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Default Password:</span>
+                <span className="font-mono font-bold text-emerald-600">{successCard.password}</span>
+              </div>
+            </div>
+
+            <button
+              onClick={() => setSuccessCard(null)}
+              className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs py-2.5 rounded-xl transition"
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* LOADING OVERLAY */}
       <LoadingOverlay
-        isLoading={submitting}
-        message="Registering Member & Creating Mobile Pass..."
+        isLoading={submitting || editSaving}
+        message={editSaving ? "Updating Plan & Add-ons..." : "Registering Member & Creating Mobile Pass..."}
       />
     </div>
   );

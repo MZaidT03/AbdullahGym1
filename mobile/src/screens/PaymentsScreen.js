@@ -445,6 +445,24 @@ export const PaymentsScreen = () => {
           }
         />
 
+        {/* Scheduled Upcoming Plan Banner (if any) */}
+        {user?.upcomingPlan ? (
+          <View style={styles.upcomingPlanCard}>
+            <View style={styles.upcomingHeaderRow}>
+              <View style={styles.upcomingIconBox}>
+                <Ionicons name="time" size={16} color="#D97706" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.upcomingTitle}>Scheduled for Next Cycle</Text>
+                <Text style={styles.upcomingSub}>{user.upcomingPlan}</Text>
+              </View>
+            </View>
+            <Text style={styles.upcomingNote}>
+              💡 Your current plan remains active this month. The new tier will apply on next payment renewal.
+            </Text>
+          </View>
+        ) : null}
+
         {/* Monthly Fee Action CTA Button */}
         <TouchableOpacity
           style={[
@@ -962,6 +980,47 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '800',
     color: colors.white,
+  },
+  upcomingPlanCard: {
+    backgroundColor: '#FEF3C7',
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 14,
+    ...theme.shadows.soft,
+  },
+  upcomingHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 6,
+  },
+  upcomingIconBox: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    backgroundColor: '#FDE68A',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  upcomingTitle: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#92400E',
+    letterSpacing: 0.3,
+  },
+  upcomingSub: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#78350F',
+    marginTop: 1,
+  },
+  upcomingNote: {
+    fontSize: 11,
+    color: '#B45309',
+    lineHeight: 15,
+    fontWeight: '500',
   },
 });
 

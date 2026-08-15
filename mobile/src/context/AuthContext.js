@@ -239,6 +239,7 @@ export const AuthProvider = ({ children }) => {
         email: userEmail || data?.email || 'member@example.com',
         memberId: data?.member_id || 'GP-8472-991',
         plan: data?.plan || 'Pro Membership',
+        upcomingPlan: data?.upcoming_plan || data?.next_plan || null,
         monthlyFee: resolvedMonthlyFee,
         avatar: data?.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=250',
         gender: data?.gender || 'Male',
