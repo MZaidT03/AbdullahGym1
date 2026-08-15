@@ -82,6 +82,7 @@ export default function MembersPage() {
   const [newPlan, setNewPlan] = useState("Pro Membership (PKR 5,000/mo)");
   const [baseFee, setBaseFee] = useState(5000);
   const [newFeePaid, setNewFeePaid] = useState("5000");
+  const [newPaymentMethod, setNewPaymentMethod] = useState("Cash / Desk");
   const [newPassword, setNewPassword] = useState("12345678");
 
   // Dynamic Supabase Plans & Add-Ons state
@@ -219,10 +220,14 @@ export default function MembersPage() {
     const foundPlan = availablePlans.find((p) => selectedPlanStr.includes(p.name));
     if (foundPlan) {
       b = foundPlan.monthly_price || foundPlan.monthlyPrice || foundPlan.daily_price || foundPlan.dailyPrice || 5000;
-    } else if (selectedPlanStr.includes("3,500")) {
-      b = 3500;
-    } else if (selectedPlanStr.includes("9,000")) {
+    } else if (selectedPlanStr.includes("12,000") || selectedPlanStr.includes("12000") || selectedPlanStr.includes("Pro Plus")) {
+      b = 12000;
+    } else if (selectedPlanStr.includes("9,000") || selectedPlanStr.includes("9000") || selectedPlanStr.includes("VIP")) {
       b = 9000;
+    } else if (selectedPlanStr.includes("3,500") || selectedPlanStr.includes("3500") || selectedPlanStr.includes("Standard")) {
+      b = 3500;
+    } else if (selectedPlanStr.includes("500") || selectedPlanStr.includes("Daily")) {
+      b = 500;
     }
     setBaseFee(b);
 
@@ -293,6 +298,7 @@ export default function MembersPage() {
           gender: newGender,
           plan: finalPlanLabel,
           fee_paid: newFeePaid,
+          payment_method: newPaymentMethod,
         }),
       });
 
@@ -313,6 +319,7 @@ export default function MembersPage() {
         gender: newGender,
         memberId: result.user?.member_id || "GP-8472-991",
         feePaid: newFeePaid,
+        paymentMethod: newPaymentMethod,
         plan: finalPlanLabel,
       });
 
@@ -322,6 +329,7 @@ export default function MembersPage() {
       setNewPhone("");
       setSelectedAddonIds([]);
       setNewFeePaid("5000");
+      setNewPaymentMethod("Cash / Desk");
       setNewPassword("12345678");
       setIsModalOpen(false);
     } catch (err) {
@@ -448,7 +456,7 @@ export default function MembersPage() {
             </button>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 bg-white p-4 rounded-xl border border-emerald-200/80 text-xs">
+          <div className="grid grid-cols-2 sm:grid-cols-6 gap-3 bg-white p-4 rounded-xl border border-emerald-200/80 text-xs">
             <div>
               <span className="text-[10px] text-slate-400 uppercase font-bold">Member</span>
               <p className="font-bold text-slate-900 truncate">{successCard.name}</p>
@@ -462,8 +470,14 @@ export default function MembersPage() {
               <p className="font-mono font-bold text-emerald-700">{successCard.memberId}</p>
             </div>
             <div>
-              <span className="text-[10px] text-slate-400 uppercase font-bold">Email</span>
-              <p className="font-medium text-slate-800 truncate">{successCard.email}</p>
+              <span className="text-[10px] text-slate-400 uppercase font-bold">Payment Method</span>
+              <p className="font-semibold text-slate-800">{successCard.paymentMethod || "Cash / Desk"}</p>
+            </div>
+            <div>
+              <span className="text-[10px] text-slate-400 uppercase font-bold">Fee Paid</span>
+              <p className="font-mono font-bold text-emerald-800">
+                PKR {Number(successCard.feePaid).toLocaleString()}
+              </p>
             </div>
             <div>
               <span className="text-[10px] text-slate-400 uppercase font-bold">App Password</span>
@@ -749,6 +763,9 @@ export default function MembersPage() {
                       <option value="Pro Membership (PKR 5,000/mo)">
                         Pro Membership (PKR 5,000/mo)
                       </option>
+                      <option value="Pro Plus Membership (PKR 12,000/mo)">
+                        Pro Plus Membership (PKR 12,000/mo)
+                      </option>
                       <option value="Standard Monthly Pass (PKR 3,500/mo)">
                         Standard Monthly Pass (PKR 3,500/mo)
                       </option>
@@ -829,6 +846,25 @@ export default function MembersPage() {
                     PKR {Number(newFeePaid).toLocaleString()}
                   </span>
                 </div>
+              </div>
+
+              {/* Payment Method Option */}
+              <div>
+                <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">
+                  Payment Method *
+                </label>
+                <select
+                  value={newPaymentMethod}
+                  onChange={(e) => setNewPaymentMethod(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs text-slate-900 font-bold focus:outline-none focus:border-emerald-500 focus:bg-white"
+                >
+                  <option value="Cash / Desk">💵 Cash / Counter</option>
+                  <option value="Bank Transfer (IBFT)">🏦 Bank Transfer (IBFT)</option>
+                  <option value="JazzCash">📱 JazzCash</option>
+                  <option value="EasyPaisa">📲 EasyPaisa</option>
+                  <option value="Credit / Debit Card">💳 Credit / Debit Card</option>
+                  <option value="Other">💼 Other</option>
+                </select>
               </div>
 
               <div>

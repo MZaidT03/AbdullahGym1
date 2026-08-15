@@ -78,6 +78,22 @@ export default function AdminConfigurationPage() {
     },
     {
       id: "plan-4",
+      name: "Pro Plus Membership",
+      type: "Monthly Executive",
+      monthly_price: 12000,
+      daily_price: 1000,
+      period: "per month",
+      features: [
+        "All Pro Membership Amenities",
+        "Personal 1-on-1 Fitness Coach",
+        "Custom Nutritional & Macro Coaching",
+        "Dedicated VIP Locker & Steam Access",
+      ],
+      popular: false,
+      active: true,
+    },
+    {
+      id: "plan-5",
       name: "VIP Champion Pass",
       type: "Monthly VIP",
       monthly_price: 9000,
@@ -155,11 +171,172 @@ export default function AdminConfigurationPage() {
   const [addonIcon, setAddonIcon] = useState("🏃");
   const [addonDescription, setAddonDescription] = useState("");
 
-  // Fetch plans & add-ons from Supabase or localStorage
+  // --- DYNAMIC PAYMENT ACCOUNTS (JAZZCASH, EASYPAISA, BANK TRANSFERS) ---
+  const initialAccounts = [
+    {
+      id: "acc-1",
+      provider: "JazzCash",
+      account_title: "ABDULLAH GYM 1",
+      account_number: "0320 8313000",
+      instructions: "Transfer monthly fee via JazzCash mobile app & attach screenshot proof.",
+      active: true,
+    },
+    {
+      id: "acc-2",
+      provider: "EasyPaisa",
+      account_title: "ABDULLAH GYM 1",
+      account_number: "0320 8313000",
+      instructions: "Transfer fee via EasyPaisa mobile app & attach screenshot proof.",
+      active: true,
+    },
+    {
+      id: "acc-3",
+      provider: "Meezan Bank",
+      account_title: "ABDULLAH GYM 1",
+      account_number: "PK79MEZN001234567890",
+      instructions: "Transfer via online bank IBAN & attach transaction screenshot.",
+      active: true,
+    },
+  ];
+
+  const [accounts, setAccounts] = useState([]);
+  const [loadingAccounts, setLoadingAccounts] = useState(true);
+  const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
+  const [editingAccount, setEditingAccount] = useState(null);
+  const [accountStatusMsg, setAccountStatusMsg] = useState("");
+
+  // Account Form State
+  const [accProvider, setAccProvider] = useState("JazzCash");
+  const [accTitle, setAccTitle] = useState("ABDULLAH GYM 1");
+  const [accNumber, setAccNumber] = useState("");
+  const [accInstructions, setAccInstructions] = useState("");
+
+  // Fetch plans, add-ons & payment accounts from Supabase or localStorage
   useEffect(() => {
     fetchPlans();
     fetchAddons();
+    fetchPaymentAccounts();
   }, []);
+
+  const fetchPaymentAccounts = async () => {
+    setLoadingAccounts(true);
+    let loadedFromSupabase = false;
+
+    if (isSupabaseConfigured()) {
+      try {
+        const { data } = await supabase
+          .from("gym_settings")
+          .select("value")
+          .eq("key", "payment_accounts")
+          .single();
+
+        if (data && data.value && Array.isArray(data.value) && data.value.length > 0) {
+          setAccounts(data.value);
+          loadedFromSupabase = true;
+          setAccountStatusMsg("✓ Connected to Supabase settings key 'payment_accounts'");
+        } else {
+          await savePaymentAccountsToSupabase(initialAccounts);
+          setAccounts(initialAccounts);
+          loadedFromSupabase = true;
+          setAccountStatusMsg("✓ Seeded default payment accounts into Supabase");
+        }
+      } catch (err) {
+        console.warn("Fetch payment accounts exception:", err);
+      }
+    }
+
+    if (!loadedFromSupabase) {
+      try {
+        const saved = localStorage.getItem("abdullah_gym_payment_accounts");
+        if (saved) setAccounts(JSON.parse(saved));
+        else setAccounts(initialAccounts);
+      } catch (e) {
+        setAccounts(initialAccounts);
+      }
+    }
+    setLoadingAccounts(false);
+  };
+
+  const savePaymentAccountsToSupabase = async (accList) => {
+    if (isSupabaseConfigured()) {
+      try {
+        await supabase.from("gym_settings").upsert({
+          key: "payment_accounts",
+          value: accList,
+          updated_at: new Date().toISOString(),
+        });
+      } catch (e) {}
+    }
+    try {
+      localStorage.setItem("abdullah_gym_payment_accounts", JSON.stringify(accList));
+    } catch (e) {}
+  };
+
+  const handleOpenAddAccountModal = () => {
+    setEditingAccount(null);
+    setAccProvider("JazzCash");
+    setAccTitle("ABDULLAH GYM 1");
+    setAccNumber("");
+    setAccInstructions("Transfer monthly fee & upload screenshot proof in mobile app.");
+    setIsAccountModalOpen(true);
+  };
+
+  const handleOpenEditAccountModal = (acc) => {
+    setEditingAccount(acc);
+    setAccProvider(acc.provider || "JazzCash");
+    setAccTitle(acc.account_title || "ABDULLAH GYM 1");
+    setAccNumber(acc.account_number || "");
+    setAccInstructions(acc.instructions || "");
+    setIsAccountModalOpen(true);
+  };
+
+  const handleSaveAccount = async (e) => {
+    e.preventDefault();
+    if (!accNumber.trim()) return;
+
+    const accPayload = {
+      id: editingAccount ? editingAccount.id : `acc-${Date.now()}`,
+      provider: accProvider,
+      account_title: accTitle.trim() || "ABDULLAH GYM 1",
+      account_number: accNumber.trim(),
+      instructions: accInstructions.trim(),
+      active: editingAccount ? editingAccount.active : true,
+    };
+
+    let updated = [];
+    if (editingAccount) {
+      updated = accounts.map((a) => (a.id === editingAccount.id ? { ...a, ...accPayload } : a));
+    } else {
+      updated = [...accounts, accPayload];
+    }
+
+    setAccounts(updated);
+    await savePaymentAccountsToSupabase(updated);
+    setIsAccountModalOpen(false);
+    setAccountStatusMsg(`✓ Saved Payment Account '${accProvider} - ${accNumber}' to Supabase!`);
+    setTimeout(() => setAccountStatusMsg(""), 5000);
+  };
+
+  const handleToggleAccountActive = async (accId) => {
+    const updated = accounts.map((a) => (a.id === accId ? { ...a, active: !a.active } : a));
+    setAccounts(updated);
+    await savePaymentAccountsToSupabase(updated);
+  };
+
+  const handleDeleteAccount = (accId) => {
+    showDialog({
+      type: "danger",
+      title: "Delete Payment Account",
+      message: "Are you sure you want to delete this payment account details?",
+      confirmText: "Delete Account",
+      cancelText: "Cancel",
+      onConfirm: async () => {
+        const updated = accounts.filter((a) => a.id !== accId);
+        setAccounts(updated);
+        await savePaymentAccountsToSupabase(updated);
+      },
+    });
+  };
 
   const fetchPlans = async () => {
     setLoadingPlans(true);
@@ -718,6 +895,17 @@ export default function AdminConfigurationPage() {
         </button>
 
         <button
+          onClick={() => setActiveTab("accounts")}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-extrabold transition-all ${
+            activeTab === "accounts"
+              ? "bg-emerald-600 text-white shadow-xs"
+              : "bg-white text-slate-600 hover:text-slate-900 border border-slate-200"
+          }`}
+        >
+          <span>🏦</span> Payment Account Details
+        </button>
+
+        <button
           onClick={() => setActiveTab("passwords")}
           className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-extrabold transition-all ${
             activeTab === "passwords"
@@ -1149,6 +1337,216 @@ export default function AdminConfigurationPage() {
                   className="px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl transition shadow-xs self-end sm:self-auto"
                 >
                   Save Geofence Settings
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* TAB: PAYMENT ACCOUNT DETAILS */}
+      {/* ========================================================================= */}
+      {activeTab === "accounts" && (
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-6">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
+                  <span>🏦</span> Member Fee Payment Account Details
+                </h2>
+                <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200 font-mono">
+                  {accounts.filter((a) => a.active).length} Active Accounts
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Set up multiple accounts (JazzCash, EasyPaisa, Meezan Bank, HBL) for members to send fee payments.
+              </p>
+              {accountStatusMsg && (
+                <p className="text-[11px] font-bold text-emerald-800 mt-1 bg-emerald-50 px-2.5 py-0.5 rounded border border-emerald-200 inline-block font-mono">
+                  {accountStatusMsg}
+                </p>
+              )}
+            </div>
+
+            <button
+              onClick={handleOpenAddAccountModal}
+              className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl transition shadow-xs flex items-center gap-2 shrink-0"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
+              </svg>
+              + Add New Account
+            </button>
+          </div>
+
+          {/* Grid of Accounts */}
+          {loadingAccounts ? (
+            <div className="py-12 text-center text-xs text-slate-400">Loading Payment Account Details...</div>
+          ) : accounts.length === 0 ? (
+            <div className="py-12 text-center text-xs text-slate-500 bg-slate-50 rounded-xl border border-slate-200">
+              No payment accounts configured. Click "+ Add New Account" above to create one.
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+              {accounts.map((acc) => (
+                <div
+                  key={acc.id}
+                  className={`bg-white border rounded-2xl p-5 space-y-4 flex flex-col justify-between transition-all shadow-xs ${
+                    acc.active ? "border-slate-200" : "border-slate-200 opacity-60"
+                  }`}
+                >
+                  <div>
+                    <div className="flex items-center justify-between gap-2 mb-3">
+                      <span className="text-xs font-black uppercase tracking-wider text-indigo-700 bg-indigo-50 px-2.5 py-1 rounded-lg border border-indigo-200 font-mono">
+                        {acc.provider}
+                      </span>
+                      <button
+                        onClick={() => handleToggleAccountActive(acc.id)}
+                        className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${
+                          acc.active
+                            ? "text-emerald-700 bg-emerald-50 border border-emerald-200"
+                            : "text-slate-500 bg-slate-100 border border-slate-200"
+                        }`}
+                      >
+                        {acc.active ? "Active" : "Disabled"}
+                      </button>
+                    </div>
+
+                    <div className="space-y-1">
+                      <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Account Title</span>
+                      <h4 className="font-extrabold text-slate-900 text-sm leading-tight">{acc.account_title}</h4>
+                    </div>
+
+                    <div className="space-y-1 mt-3 p-3 bg-slate-50 border border-slate-200 rounded-xl font-mono">
+                      <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Account # / IBAN</span>
+                      <p className="font-black text-emerald-800 text-sm">{acc.account_number}</p>
+                    </div>
+
+                    {acc.instructions && (
+                      <p className="text-xs text-slate-500 italic mt-3 bg-amber-50/50 p-2.5 rounded-lg border border-amber-100">
+                        "{acc.instructions}"
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
+                    <button
+                      onClick={() => handleOpenEditAccountModal(acc)}
+                      className="flex-1 py-1.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-xs font-bold text-slate-900 rounded-xl transition"
+                    >
+                      Edit Account Details
+                    </button>
+                    <button
+                      onClick={() => handleDeleteAccount(acc.id)}
+                      title="Delete Account"
+                      className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition"
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* MODAL: ADD / EDIT PAYMENT ACCOUNT DETAILS */}
+      {isAccountModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+          <div className="bg-white border border-slate-200 rounded-3xl max-w-md w-full p-6 space-y-5 shadow-2xl text-slate-900">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div>
+                <h3 className="text-base font-extrabold text-slate-900">
+                  {editingAccount ? "Edit Payment Account Details" : "Add Payment Account Details"}
+                </h3>
+                <p className="text-xs text-slate-500">Account info will be visible in the member mobile app.</p>
+              </div>
+              <button
+                onClick={() => setIsAccountModalOpen(false)}
+                className="text-slate-400 hover:text-slate-700 font-bold text-sm cursor-pointer hover:bg-slate-100 p-1.5 rounded-lg transition"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveAccount} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-600 uppercase mb-1">
+                  Payment Method / Provider *
+                </label>
+                <select
+                  value={accProvider}
+                  onChange={(e) => setAccProvider(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 font-bold focus:outline-none focus:border-emerald-500"
+                >
+                  <option value="JazzCash">JazzCash</option>
+                  <option value="EasyPaisa">EasyPaisa</option>
+                  <option value="Meezan Bank">Meezan Bank</option>
+                  <option value="HBL Bank">HBL Bank</option>
+                  <option value="NayaPay">NayaPay</option>
+                  <option value="SadaPay">SadaPay</option>
+                  <option value="Bank Transfer">Bank Transfer (Other)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-600 uppercase mb-1">
+                  Account Title *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={accTitle}
+                  onChange={(e) => setAccTitle(e.target.value)}
+                  placeholder="e.g. ABDULLAH GYM 1"
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-emerald-500 font-bold"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-600 uppercase mb-1">
+                  Account Number / IBAN *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={accNumber}
+                  onChange={(e) => setAccNumber(e.target.value)}
+                  placeholder="e.g. 0320 8313000 or IBAN"
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-emerald-500 font-mono font-bold"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-600 uppercase mb-1">
+                  Transfer Instructions (Optional)
+                </label>
+                <textarea
+                  rows={2}
+                  value={accInstructions}
+                  onChange={(e) => setAccInstructions(e.target.value)}
+                  placeholder="e.g. Transfer monthly fee & attach screenshot proof in mobile app."
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2 text-xs text-slate-900 focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div className="pt-3 border-t border-slate-100 flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setIsAccountModalOpen(false)}
+                  className="px-4 py-2 bg-slate-100 text-xs font-bold text-slate-700 rounded-xl hover:bg-slate-200"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-emerald-600 text-xs font-bold text-white rounded-xl hover:bg-emerald-700 shadow-xs"
+                >
+                  Save Account Details
                 </button>
               </div>
             </form>

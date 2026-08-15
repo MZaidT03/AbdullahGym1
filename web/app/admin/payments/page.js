@@ -257,13 +257,13 @@ export default function PaymentsAdminPage() {
     setLoading(false);
   };
 
-  const handleApprovePayment = async (targetMember) => {
-    setStatusMsg(`✓ Approved online payment transfer screenshot for ${targetMember.full_name || "member"}!`);
+  const handleApprovePayment = async (targetMember, explicitProofUrl = null) => {
+    setStatusMsg(`✓ Approved online payment transfer for ${targetMember.full_name || "member"}! (Proof screenshot deleted from Storage to save space)`);
 
     setPayments((prev) =>
       prev.map((p) =>
         p.user_id === targetMember.id || p.member_name === targetMember.full_name
-          ? { ...p, status: "Paid", remaining: "PKR 0", raw_remaining: 0 }
+          ? { ...p, status: "Paid", proof_url: null, remaining: "PKR 0", raw_remaining: 0 }
           : p
       )
     );
@@ -276,11 +276,116 @@ export default function PaymentsAdminPage() {
 
     if (isSupabaseConfigured()) {
       try {
-        await supabase.from("payments").update({ status: "Paid" }).eq("user_id", targetMember.id);
-        await supabase.from("profiles").update({ status: "Active" }).eq("id", targetMember.id);
+        // 1. Collect all proof_urls to delete from Supabase Storage bucket 'payment-proofs'
+        const { data: memberPayments } = await supabase
+          .from("payments")
+          .select("id, proof_url")
+          .eq("user_id", targetMember.id);
+
+        const urlsToDelete = [];
+        if (explicitProofUrl) urlsToDelete.push(explicitProofUrl);
+        if (memberPayments && memberPayments.length > 0) {
+          memberPayments.forEach((p) => {
+            if (p.proof_url) urlsToDelete.push(p.proof_url);
+          });
+        }
+
+        const deletedPaths = new Set();
+        for (const url of urlsToDelete) {
+          if (url && url.includes("payment-proofs")) {
+            try {
+              const urlParts = url.split("/payment-proofs/");
+              if (urlParts.length > 1) {
+                const filePath = urlParts[1].split("?")[0];
+                if (!deletedPaths.has(filePath)) {
+                  deletedPaths.add(filePath);
+                  await supabase.storage.from("payment-proofs").remove([filePath]);
+                }
+              }
+            } catch (storageErr) {
+              console.warn("Storage cleanup notice:", storageErr);
+            }
+          }
+        }
+
+        // 2. Update status to 'Paid' and clear proof_url in database
+        const targetUserId = targetMember.user_id || targetMember.id;
+
+        await supabase
+          .from("payments")
+          .update({ status: "Paid", proof_url: null })
+          .or(`user_id.eq.${targetUserId},id.eq.${targetMember.id}`);
+
+        if (targetUserId) {
+          await supabase.from("profiles").update({ status: "Active" }).eq("id", targetUserId);
+        }
         await fetchPaymentsAndMembers();
       } catch (err) {
         console.error("Supabase approve error:", err);
+      }
+    }
+
+    setActiveProof(null);
+    setTimeout(() => setStatusMsg(""), 5000);
+  };
+
+  const handleRejectPayment = async (targetMember, explicitProofUrl = null) => {
+    if (!confirm(`Are you sure you want to reject the payment proof for ${targetMember.full_name || "this member"}?`)) {
+      return;
+    }
+
+    setStatusMsg(`Payment proof rejected for ${targetMember.full_name || "member"}. Screenshot deleted from storage.`);
+
+    setPayments((prev) =>
+      prev.map((p) =>
+        p.user_id === targetMember.id || p.member_name === targetMember.full_name || p.id === targetMember.id
+          ? { ...p, status: "Rejected", proof_url: null }
+          : p
+      )
+    );
+
+    if (isSupabaseConfigured()) {
+      try {
+        const targetUserId = targetMember.user_id || targetMember.id;
+        const { data: memberPayments } = await supabase
+          .from("payments")
+          .select("id, proof_url")
+          .or(`user_id.eq.${targetUserId},id.eq.${targetMember.id}`);
+
+        const urlsToDelete = [];
+        if (explicitProofUrl) urlsToDelete.push(explicitProofUrl);
+        if (memberPayments && memberPayments.length > 0) {
+          memberPayments.forEach((p) => {
+            if (p.proof_url) urlsToDelete.push(p.proof_url);
+          });
+        }
+
+        const deletedPaths = new Set();
+        for (const url of urlsToDelete) {
+          if (url && url.includes("payment-proofs")) {
+            try {
+              const urlParts = url.split("/payment-proofs/");
+              if (urlParts.length > 1) {
+                const filePath = urlParts[1].split("?")[0];
+                if (!deletedPaths.has(filePath)) {
+                  deletedPaths.add(filePath);
+                  await supabase.storage.from("payment-proofs").remove([filePath]);
+                }
+              }
+            } catch (storageErr) {
+              console.warn("Storage cleanup notice on reject:", storageErr);
+            }
+          }
+        }
+
+        await supabase
+          .from("payments")
+          .update({ status: "Rejected", proof_url: null })
+          .or(`user_id.eq.${targetUserId},id.eq.${targetMember.id}`);
+
+        await fetchPaymentsAndMembers();
+      } catch (err) {
+        console.error("Supabase reject error:", err);
       }
     }
 
@@ -355,6 +460,7 @@ export default function PaymentsAdminPage() {
           {
             user_id: targetUserId,
             amount: numericAmount,
+            total_fee: actualTotalFee,
             status: finalStatus,
             payment_method: method,
             invoice_id: isWalkInPayment ? `INV-WALK-${Math.floor(1000 + Math.random() * 9000)}` : invId,
@@ -1129,17 +1235,24 @@ export default function PaymentsAdminPage() {
               />
             </div>
 
-            <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100">
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
               <button
                 type="button"
                 onClick={() => setActiveProof(null)}
-                className="text-xs text-slate-500 hover:text-slate-800 px-3 py-2 rounded-xl font-semibold"
+                className="text-xs text-slate-500 hover:text-slate-800 px-3 py-2 rounded-xl font-semibold mr-auto"
               >
                 Close
               </button>
               <button
                 type="button"
-                onClick={() => handleApprovePayment(activeProof.member)}
+                onClick={() => handleRejectPayment(activeProof.member, activeProof.info?.proof_url)}
+                className="bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs px-3.5 py-2 rounded-xl border border-rose-200 transition-all"
+              >
+                Reject Proof
+              </button>
+              <button
+                type="button"
+                onClick={() => handleApprovePayment(activeProof.member, activeProof.info?.proof_url)}
                 className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-4 py-2 rounded-xl transition-all shadow-xs"
               >
                 Approve Transfer

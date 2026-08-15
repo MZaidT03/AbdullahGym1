@@ -1,98 +1,84 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import colors from '../constants/colors';
 import theme from '../constants/theme';
 
-export const AttendanceSummary = ({ percentage = 85, presentCount = 17, absentCount = 3 }) => {
+export const AttendanceSummary = ({ percentage = 85, presentCount = 14, absentCount = 4 }) => {
   return (
-    <View style={styles.containerRow}>
-      {/* Percentage Big Card */}
-      <View style={styles.percentageCard}>
-        <Text style={styles.percentageText}>{percentage}%</Text>
-        <Text style={styles.percentageLabel}>ATTENDANCE</Text>
+    <View style={styles.container}>
+      {/* 3 Overview Metric Capsules */}
+      <View style={styles.capsule}>
+        <View style={[styles.iconBox, { backgroundColor: '#F0FDF4' }]}>
+          <Ionicons name="pie-chart" size={16} color={colors.primaryDark} />
+        </View>
+        <Text style={styles.valueText}>{percentage}%</Text>
+        <Text style={styles.labelText}>ATTENDANCE</Text>
+        <Text style={styles.subText}>This Month</Text>
       </View>
 
-      {/* Counts Stack Card */}
-      <View style={styles.countsCard}>
-        <View style={styles.countRow}>
-          <Text style={styles.countLabel}>Present</Text>
-          <Text style={[styles.countValue, styles.presentValue]}>{presentCount}</Text>
+      <View style={styles.capsule}>
+        <View style={[styles.iconBox, { backgroundColor: '#F0FDF4' }]}>
+          <Ionicons name="barbell" size={16} color={colors.primaryDark} />
         </View>
-        <View style={styles.divider} />
-        <View style={styles.countRow}>
-          <Text style={styles.countLabel}>Absent</Text>
-          <Text style={[styles.countValue, styles.absentValue]}>{absentCount}</Text>
+        <Text style={[styles.valueText, { color: colors.primaryDark }]}>{presentCount}</Text>
+        <Text style={styles.labelText}>SESSIONS</Text>
+        <Text style={styles.subText}>Completed</Text>
+      </View>
+
+      <View style={styles.capsule}>
+        <View style={[styles.iconBox, { backgroundColor: '#F8FAFC' }]}>
+          <Ionicons name="bed-outline" size={16} color={colors.textSecondary} />
         </View>
+        <Text style={[styles.valueText, { color: colors.textSecondary }]}>{absentCount}</Text>
+        <Text style={styles.labelText}>REST DAYS</Text>
+        <Text style={styles.subText}>Recovery</Text>
       </View>
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  containerRow: {
+  container: {
     flexDirection: 'row',
+    gap: 10,
     marginBottom: 16,
-    gap: 12,
   },
-  percentageCard: {
-    flex: 1.1,
-    backgroundColor: colors.cardBackgroundAlt,
+  capsule: {
+    flex: 1,
+    backgroundColor: colors.cardBackground,
     borderRadius: 18,
-    padding: 16,
+    padding: 12,
+    alignItems: 'center',
     borderWidth: 1,
     borderColor: colors.border,
-    justifyContent: 'center',
-    alignItems: 'center',
     ...theme.shadows.soft,
   },
-  percentageText: {
-    fontSize: 34,
-    fontWeight: '800',
-    color: colors.primaryDark,
-    letterSpacing: -1,
+  iconBox: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 6,
   },
-  percentageLabel: {
-    fontSize: 11,
-    fontWeight: '700',
+  valueText: {
+    fontSize: 18,
+    fontWeight: '900',
+    color: colors.textPrimary,
+  },
+  labelText: {
+    fontSize: 9,
+    fontWeight: '800',
     color: colors.textSecondary,
-    letterSpacing: 0.8,
+    letterSpacing: 0.6,
     marginTop: 2,
   },
-  countsCard: {
-    flex: 1,
-    backgroundColor: colors.cardBackgroundAlt,
-    borderRadius: 18,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: colors.border,
-    justifyContent: 'center',
-    ...theme.shadows.soft,
-  },
-  countRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 4,
-  },
-  countLabel: {
-    fontSize: 13,
-    fontWeight: '500',
-    color: colors.textSecondary,
-  },
-  countValue: {
-    fontSize: 18,
-    fontWeight: '800',
-  },
-  presentValue: {
-    color: colors.primaryDark,
-  },
-  absentValue: {
-    color: colors.danger,
-  },
-  divider: {
-    height: 1,
-    backgroundColor: colors.border,
-    marginVertical: 4,
+  subText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: colors.textMuted,
+    marginTop: 1,
   },
 });
 

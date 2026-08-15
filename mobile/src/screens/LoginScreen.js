@@ -30,16 +30,18 @@ export const LoginScreen = ({ navigation }) => {
     setErrorMessage('');
     setIsSubmitting(true);
 
-    setTimeout(async () => {
+    try {
       const result = await login(email, password);
-      setIsSubmitting(false);
-
-      if (result.success) {
+      if (result && result.success) {
         navigation.replace('MainApp');
       } else {
-        setErrorMessage(result.message || 'Invalid email or password.');
+        setErrorMessage(result?.message || 'Invalid email or password.');
       }
-    }, 400);
+    } catch (err) {
+      setErrorMessage(err?.message || 'An error occurred during login.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -191,6 +193,13 @@ export const LoginScreen = ({ navigation }) => {
             <TouchableOpacity activeOpacity={0.7}>
               <Text style={styles.joinText}> Join Abdullah Gym 1</Text>
             </TouchableOpacity>
+          </View>
+
+          {/* Powered by CodeInn' Tech */}
+          <View style={styles.devFooter}>
+            <Text style={styles.devFooterText}>
+              Powered By CodeInn' Tech | contact@codeinntech.com
+            </Text>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -386,6 +395,17 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
     color: colors.primaryDark,
+  },
+  devFooter: {
+    marginTop: 24,
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  devFooterText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: colors.textMuted,
+    letterSpacing: 0.2,
   },
 });
 

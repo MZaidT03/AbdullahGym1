@@ -1,63 +1,105 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import colors from '../constants/colors';
 import theme from '../constants/theme';
 
 export const AttendanceCalendar = ({
-  presentDays = [1, 2, 4, 5, 7, 8, 11, 12, 14, 15, 16, 19, 21, 22, 23, 24],
-  absentDays = [9, 18],
-  initialSelectedDay = 24,
+  presentDays = [],
+  absentDays = [],
+  currentMonth = new Date(),
+  onMonthChange,
+  onDayPress,
 }) => {
-  const [selectedDay, setSelectedDay] = useState(initialSelectedDay);
+  const [activeDate, setActiveDate] = useState(new Date(currentMonth));
+  const [selectedDay, setSelectedDay] = useState(new Date().getDate());
 
-  const daysOfWeek = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
-
-  // October 2024 grid data (starts on Tuesday Oct 1)
-  const calendarGrid = [
-    { day: 29, isCurrentMonth: false },
-    { day: 30, isCurrentMonth: false },
-    { day: 1, isCurrentMonth: true },
-    { day: 2, isCurrentMonth: true },
-    { day: 3, isCurrentMonth: true },
-    { day: 4, isCurrentMonth: true },
-    { day: 5, isCurrentMonth: true },
-
-    { day: 6, isCurrentMonth: true },
-    { day: 7, isCurrentMonth: true },
-    { day: 8, isCurrentMonth: true },
-    { day: 9, isCurrentMonth: true },
-    { day: 10, isCurrentMonth: true },
-    { day: 11, isCurrentMonth: true },
-    { day: 12, isCurrentMonth: true },
-
-    { day: 13, isCurrentMonth: true },
-    { day: 14, isCurrentMonth: true },
-    { day: 15, isCurrentMonth: true },
-    { day: 16, isCurrentMonth: true },
-    { day: 17, isCurrentMonth: true },
-    { day: 18, isCurrentMonth: true },
-    { day: 19, isCurrentMonth: true },
-
-    { day: 20, isCurrentMonth: true },
-    { day: 21, isCurrentMonth: true },
-    { day: 22, isCurrentMonth: true },
-    { day: 23, isCurrentMonth: true },
-    { day: 24, isCurrentMonth: true },
-    { day: 25, isCurrentMonth: true },
-    { day: 26, isCurrentMonth: true },
-
-    { day: 27, isCurrentMonth: true },
-    { day: 28, isCurrentMonth: true },
-    { day: 29, isCurrentMonth: true },
-    { day: 30, isCurrentMonth: true },
-    { day: 31, isCurrentMonth: true },
-    { day: 1, isCurrentMonth: false },
-    { day: 2, isCurrentMonth: false },
+  const daysOfWeek = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const monthNames = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December',
   ];
+
+  const year = activeDate.getFullYear();
+  const month = activeDate.getMonth();
+
+  // Generate calendar days for current view month
+  const firstDayIndex = (new Date(year, month, 1).getDay() + 6) % 7; // Monday = 0
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const daysInPrevMonth = new Date(year, month, 0).getDate();
+
+  const grid = [];
+
+  // Previous month trailing days
+  for (let i = firstDayIndex - 1; i >= 0; i--) {
+    grid.push({
+      day: daysInPrevMonth - i,
+      isCurrentMonth: false,
+      date: new Date(year, month - 1, daysInPrevMonth - i),
+    });
+  }
+
+  // Current month days
+  for (let i = 1; i <= daysInMonth; i++) {
+    grid.push({
+      day: i,
+      isCurrentMonth: true,
+      date: new Date(year, month, i),
+    });
+  }
+
+  // Next month leading days
+  const remainingCells = 35 - grid.length > 0 ? 35 - grid.length : (42 - grid.length > 0 ? 42 - grid.length : 0);
+  for (let i = 1; i <= remainingCells; i++) {
+    grid.push({
+      day: i,
+      isCurrentMonth: false,
+      date: new Date(year, month + 1, i),
+    });
+  }
+
+  const today = new Date();
+  const isActualCurrentMonth = today.getFullYear() === year && today.getMonth() === month;
+
+  const handlePrevMonth = () => {
+    const prev = new Date(year, month - 1, 1);
+    setActiveDate(prev);
+    if (onMonthChange) onMonthChange(prev);
+  };
+
+  const handleNextMonth = () => {
+    const next = new Date(year, month + 1, 1);
+    setActiveDate(next);
+    if (onMonthChange) onMonthChange(next);
+  };
+
+  const handleDaySelect = (item) => {
+    if (item.isCurrentMonth) {
+      setSelectedDay(item.day);
+      if (onDayPress) onDayPress(item.day);
+    }
+  };
 
   return (
     <View style={styles.card}>
-      {/* Weekday Labels */}
+      {/* Month Navigator Toolbar */}
+      <View style={styles.toolbar}>
+        <TouchableOpacity style={styles.navBtn} onPress={handlePrevMonth} activeOpacity={0.7}>
+          <Ionicons name="chevron-back" size={18} color={colors.textPrimary} />
+        </TouchableOpacity>
+
+        <View style={styles.monthTitleBox}>
+          <Text style={styles.monthTitle}>
+            {monthNames[month]} {year}
+          </Text>
+        </View>
+
+        <TouchableOpacity style={styles.navBtn} onPress={handleNextMonth} activeOpacity={0.7}>
+          <Ionicons name="chevron-forward" size={18} color={colors.textPrimary} />
+        </TouchableOpacity>
+      </View>
+
+      {/* Weekday Labels Header */}
       <View style={styles.weekHeader}>
         {daysOfWeek.map((day, idx) => (
           <Text key={idx} style={styles.weekDayText}>
@@ -66,11 +108,11 @@ export const AttendanceCalendar = ({
         ))}
       </View>
 
-      {/* Days Grid */}
+      {/* Days Matrix Grid */}
       <View style={styles.grid}>
-        {calendarGrid.map((item, index) => {
+        {grid.map((item, index) => {
           const isPresent = item.isCurrentMonth && presentDays.includes(item.day);
-          const isAbsent = item.isCurrentMonth && absentDays.includes(item.day);
+          const isToday = isActualCurrentMonth && item.day === today.getDate() && item.isCurrentMonth;
           const isSelected = item.isCurrentMonth && item.day === selectedDay;
 
           return (
@@ -79,35 +121,49 @@ export const AttendanceCalendar = ({
               disabled={!item.isCurrentMonth}
               style={[
                 styles.dayCell,
-                isSelected && styles.selectedCell,
+                isPresent && styles.presentCell,
+                isToday && !isPresent && styles.todayCell,
+                isSelected && !isPresent && styles.selectedCell,
               ]}
-              onPress={() => setSelectedDay(item.day)}
+              onPress={() => handleDaySelect(item)}
+              activeOpacity={0.75}
             >
               <Text
                 style={[
                   styles.dayText,
                   !item.isCurrentMonth && styles.otherMonthText,
                   isPresent && styles.presentText,
-                  isAbsent && styles.absentText,
-                  isSelected && styles.selectedText,
+                  isToday && !isPresent && styles.todayText,
+                  isSelected && !isPresent && styles.selectedText,
                 ]}
               >
                 {item.day}
               </Text>
+              {isPresent && (
+                <View style={styles.checkDot}>
+                  <Ionicons name="checkmark" size={9} color={colors.white} />
+                </View>
+              )}
             </TouchableOpacity>
           );
         })}
       </View>
 
-      {/* Legend */}
+      {/* Legend Footer */}
       <View style={styles.legendContainer}>
         <View style={styles.legendItem}>
           <View style={[styles.legendDot, { backgroundColor: colors.primary }]} />
-          <Text style={styles.legendText}>Present</Text>
+          <Text style={styles.legendText}>Workout Done</Text>
         </View>
+
         <View style={styles.legendItem}>
-          <View style={[styles.legendDot, { backgroundColor: colors.danger }]} />
-          <Text style={styles.legendText}>Absent</Text>
+          <View style={[styles.legendRing, { borderColor: colors.primary }]} />
+          <Text style={styles.legendText}>Today</Text>
+        </View>
+
+        <View style={styles.legendItem}>
+          <View style={[styles.legendDot, { backgroundColor: '#E2E8F0' }]} />
+          <Text style={styles.legendText}>Rest Day</Text>
         </View>
       </View>
     </View>
@@ -116,88 +172,129 @@ export const AttendanceCalendar = ({
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: colors.white,
+    backgroundColor: colors.cardBackground,
     borderRadius: 20,
     padding: 16,
     borderWidth: 1,
     borderColor: colors.border,
-    marginBottom: 20,
+    marginBottom: 16,
     ...theme.shadows.soft,
+  },
+  toolbar: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 14,
+  },
+  monthTitleBox: {
+    alignItems: 'center',
+  },
+  monthTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: colors.textPrimary,
+  },
+  navBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    backgroundColor: '#F1F5F9',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   weekHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
-    marginBottom: 12,
+    justifyContent: 'space-between',
+    marginBottom: 8,
     paddingBottom: 8,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
   weekDayText: {
-    width: 36,
+    width: 38,
     textAlign: 'center',
-    fontSize: 13,
+    fontSize: 11,
     fontWeight: '700',
     color: colors.textSecondary,
+    letterSpacing: 0.2,
   },
   grid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'space-around',
+    justifyContent: 'space-between',
   },
   dayCell: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 38,
+    height: 38,
+    borderRadius: 12,
     justifyContent: 'center',
     alignItems: 'center',
-    marginVertical: 4,
+    marginVertical: 3,
+    position: 'relative',
+  },
+  presentCell: {
+    backgroundColor: colors.primary,
+    ...theme.shadows.soft,
+  },
+  todayCell: {
+    borderWidth: 2,
+    borderColor: colors.primary,
+    backgroundColor: 'rgba(22, 196, 91, 0.1)',
   },
   selectedCell: {
-    backgroundColor: colors.primary,
-    ...theme.shadows.glow,
+    backgroundColor: '#F1F5F9',
   },
   dayText: {
-    fontSize: 14,
-    fontWeight: '600',
+    fontSize: 13,
+    fontWeight: '700',
     color: colors.textPrimary,
   },
   otherMonthText: {
-    color: '#D1D5DB',
+    color: '#CBD5E1',
+    fontWeight: '500',
   },
   presentText: {
-    color: colors.primaryDark,
-    fontWeight: '800',
+    color: colors.white,
+    fontWeight: '900',
   },
-  absentText: {
-    color: colors.danger,
-    fontWeight: '800',
+  todayText: {
+    color: colors.primaryDark,
+    fontWeight: '900',
   },
   selectedText: {
-    color: colors.white,
-    fontWeight: '800',
+    color: colors.textPrimary,
+  },
+  checkDot: {
+    position: 'absolute',
+    bottom: 2,
   },
   legendContainer: {
     flexDirection: 'row',
-    justifyContent: 'center',
+    justifyContent: 'space-around',
     alignItems: 'center',
     marginTop: 14,
-    paddingTop: 10,
+    paddingTop: 12,
     borderTopWidth: 1,
     borderTopColor: colors.border,
-    gap: 24,
   },
   legendItem: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 6,
   },
   legendDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  legendRing: {
     width: 10,
     height: 10,
     borderRadius: 5,
-    marginRight: 6,
+    borderWidth: 2,
   },
   legendText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
     color: colors.textSecondary,
   },

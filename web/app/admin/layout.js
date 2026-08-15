@@ -268,11 +268,13 @@ export default function AdminLayout({ children }) {
                 ← View Public Site
               </Link>
 
-              <div className="pt-2 text-center">
-                <p className="text-[10px] font-bold text-slate-600">CodeInn Tech System</p>
-                <a href="mailto:contact@codeinntech.com" className="text-[10px] text-slate-400 hover:underline block font-mono">
-                  contact@codeinntech.com
-                </a>
+              <div className="pt-2 text-center px-1">
+                <p className="text-[10px] font-medium text-slate-500 leading-tight">
+                  Powered By <span className="font-bold text-slate-700">CodeInn' Tech</span> |{" "}
+                  <a href="mailto:contact@codeinntech.com" className="text-emerald-600 hover:underline font-mono">
+                    contact@codeinntech.com
+                  </a>
+                </p>
               </div>
             </>
           )}
