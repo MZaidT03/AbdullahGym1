@@ -196,10 +196,6 @@ export default function RevenueAdminPage() {
   const [methodFilter, setMethodFilter] = useState("All"); // 'All' | 'Cash / Desk' | 'EasyPaisa' | 'JazzCash' | 'Bank Transfer'
   const [searchTerm, setSearchTerm] = useState("");
 
-  useEffect(() => {
-    fetchRevenueData();
-  }, []);
-
   const fetchRevenueData = async () => {
     setLoading(true);
     let loadedFromSupabase = false;
@@ -329,6 +325,10 @@ export default function RevenueAdminPage() {
 
     setLoading(false);
   };
+
+  useEffect(() => {
+    fetchRevenueData();
+  }, []);
 
   // Filtered Payments Dataset
   const filteredPayments = payments.filter((p) => {
@@ -477,37 +477,30 @@ export default function RevenueAdminPage() {
       : getMonthlyChartData();
 
   return (
-    <div className="space-y-8 max-w-7xl mx-auto font-sans">
-      {/* HEADER BANNER */}
-      <div className="relative overflow-hidden bg-gradient-to-r from-slate-900 via-slate-800 to-emerald-950 rounded-3xl p-6 sm:p-8 shadow-md border border-slate-800 text-white flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-        <div className="space-y-1.5 z-10">
-          <div className="flex items-center gap-2">
-            <span className="bg-emerald-500/20 text-emerald-300 text-[11px] font-bold px-2.5 py-0.5 rounded-full border border-emerald-500/30 backdrop-blur-md">
-              Financial Intelligence
-            </span>
-            <span className="text-slate-400 text-xs">• Revenue Analytics & Ledger</span>
-          </div>
-          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
-            Revenue & Financial Overview 📈
+    <div className="space-y-6 font-sans text-slate-800">
+      {/* HEADER SECTION */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
+            Revenue & Financial Overview
           </h1>
-          <p className="text-xs sm:text-sm text-slate-300 max-w-xl">
-            Detailed breakdown of monthly subscriptions, walk-in revenues, payment methods, and financial growth charts.
-          </p>
         </div>
 
         {/* Quick Action Navigation */}
-        <div className="flex flex-wrap gap-2.5 z-10 shrink-0">
+        <div className="flex items-center gap-2.5">
           <Link
             href="/admin/payments"
-            className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs px-4 py-2.5 rounded-xl transition-all duration-150 shadow-sm flex items-center gap-1.5 hover:scale-[1.02]"
+            className="inline-flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow-md shadow-emerald-600/20 transition-all active:scale-95 cursor-pointer"
           >
-            <span>💳</span> Payments & Invoices
+            <span>💳</span>
+            <span>Payments & Billing</span>
           </Link>
           <Link
             href="/admin/members"
-            className="bg-slate-800/80 hover:bg-slate-800 border border-slate-700 text-slate-200 font-semibold text-xs px-4 py-2.5 rounded-xl transition-all duration-150 flex items-center gap-1.5"
+            className="inline-flex items-center justify-center gap-2 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 font-bold text-xs px-4 py-2.5 rounded-xl shadow-2xs transition-all active:scale-95 cursor-pointer"
           >
-            <span>👥</span> Members Directory
+            <span>👥</span>
+            <span>Members Directory</span>
           </Link>
         </div>
       </div>

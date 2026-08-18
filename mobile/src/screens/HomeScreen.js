@@ -167,7 +167,7 @@ export const HomeScreen = ({ navigation }) => {
 
   const daysRem = user?.daysRemaining !== undefined ? user.daysRemaining : 30;
   const overdueDays = user?.overdueDays !== undefined ? user.overdueDays : 0;
-  const isDeactivated = user?.status === 'Inactive' || user?.status === 'Deactivated' || overdueDays > 7;
+  const isDeactivated = user?.status === 'Suspended' || user?.status === 'Inactive' || user?.status === 'Deactivated' || overdueDays > 7;
 
   // 7-Day Workout Tracker Data
   const daysOfWeek = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];

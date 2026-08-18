@@ -207,6 +207,7 @@ export default function AdminConfigurationPage() {
 
   // Account Form State
   const [accProvider, setAccProvider] = useState("JazzCash");
+  const [accCustomBank, setAccCustomBank] = useState("");
   const [accTitle, setAccTitle] = useState("ABDULLAH GYM 1");
   const [accNumber, setAccNumber] = useState("");
   const [accInstructions, setAccInstructions] = useState("");
@@ -275,6 +276,7 @@ export default function AdminConfigurationPage() {
   const handleOpenAddAccountModal = () => {
     setEditingAccount(null);
     setAccProvider("JazzCash");
+    setAccCustomBank("");
     setAccTitle("ABDULLAH GYM 1");
     setAccNumber("");
     setAccInstructions("Transfer monthly fee & upload screenshot proof in mobile app.");
@@ -283,7 +285,14 @@ export default function AdminConfigurationPage() {
 
   const handleOpenEditAccountModal = (acc) => {
     setEditingAccount(acc);
-    setAccProvider(acc.provider || "JazzCash");
+    const prov = acc.provider || "JazzCash";
+    if (prov.includes("Bank Transfer (") || (!["JazzCash", "EasyPaisa", "Meezan Bank", "HBL Bank", "NayaPay", "SadaPay"].includes(prov))) {
+      setAccProvider("Bank Transfer");
+      setAccCustomBank(prov.replace(/^Bank Transfer \(|\)$/g, ""));
+    } else {
+      setAccProvider(prov);
+      setAccCustomBank("");
+    }
     setAccTitle(acc.account_title || "ABDULLAH GYM 1");
     setAccNumber(acc.account_number || "");
     setAccInstructions(acc.instructions || "");
@@ -294,9 +303,14 @@ export default function AdminConfigurationPage() {
     e.preventDefault();
     if (!accNumber.trim()) return;
 
+    const finalProvider =
+      (accProvider === "Bank Transfer" || accProvider === "Other Bank") && accCustomBank.trim()
+        ? `Bank Transfer (${accCustomBank.trim()})`
+        : accProvider;
+
     const accPayload = {
       id: editingAccount ? editingAccount.id : `acc-${Date.now()}`,
-      provider: accProvider,
+      provider: finalProvider,
       account_title: accTitle.trim() || "ABDULLAH GYM 1",
       account_number: accNumber.trim(),
       instructions: accInstructions.trim(),
@@ -313,7 +327,7 @@ export default function AdminConfigurationPage() {
     setAccounts(updated);
     await savePaymentAccountsToSupabase(updated);
     setIsAccountModalOpen(false);
-    setAccountStatusMsg(`✓ Saved Payment Account '${accProvider} - ${accNumber}' to Supabase!`);
+    setAccountStatusMsg(`✓ Saved Payment Account '${finalProvider} - ${accNumber}' to Supabase!`);
     setTimeout(() => setAccountStatusMsg(""), 5000);
   };
 
@@ -392,30 +406,30 @@ export default function AdminConfigurationPage() {
 
     if (isSupabaseConfigured()) {
       try {
-        // 1. Try querying dedicated Supabase table `gym_addons`
-        const { data, error } = await supabase
-          .from("gym_addons")
-          .select("*")
-          .order("created_at", { ascending: true });
+        // 1. Query Supabase settings key `gym_addons` safely
+        const { data: setObj } = await supabase
+          .from("gym_settings")
+          .select("value")
+          .eq("key", "gym_addons")
+          .maybeSingle();
 
-        if (!error && data && data.length > 0) {
-          setAddons(data);
+        if (setObj && setObj.value && Array.isArray(setObj.value) && setObj.value.length > 0) {
+          setAddons(setObj.value);
           loadedFromSupabase = true;
-          setAddonStatusMsg("✓ Connected to Supabase table 'gym_addons'");
+          setAddonStatusMsg("✓ Connected to Supabase settings key 'gym_addons'");
         } else {
-          // 2. Fallback to `gym_settings` table (`key = "gym_addons"`)
-          const { data: setObj } = await supabase
-            .from("gym_settings")
-            .select("value")
-            .eq("key", "gym_addons")
-            .single();
+          // 2. Try dedicated Supabase table `gym_addons`
+          const { data, error } = await supabase
+            .from("gym_addons")
+            .select("*")
+            .order("created_at", { ascending: true });
 
-          if (setObj && setObj.value && Array.isArray(setObj.value) && setObj.value.length > 0) {
-            setAddons(setObj.value);
+          if (!error && data && data.length > 0) {
+            setAddons(data);
             loadedFromSupabase = true;
-            setAddonStatusMsg("✓ Connected to Supabase settings key 'gym_addons'");
+            setAddonStatusMsg("✓ Connected to Supabase table 'gym_addons'");
           } else {
-            // Auto-seed initial addons into Supabase
+            // Auto-seed initial addons into Supabase settings
             await saveAddonsToSupabase(initialAddons);
             setAddons(initialAddons);
             loadedFromSupabase = true;
@@ -423,7 +437,7 @@ export default function AdminConfigurationPage() {
           }
         }
       } catch (err) {
-        console.warn("Fetch addons exception:", err);
+        console.warn("Notice loading addons:", err);
       }
     }
 
@@ -647,76 +661,7 @@ export default function AdminConfigurationPage() {
     }
   };
 
-  // --- TAB 2: MEMBER PASSWORD RESET MANAGER ---
-  const [members, setMembers] = useState([]);
-  const [searchMember, setSearchMember] = useState("");
-  const [resetTarget, setResetTarget] = useState(null);
-  const [newMemberPass, setNewMemberPass] = useState("12345678");
-  const [resetMsg, setResetMsg] = useState("");
-  const [resetSubmitting, setResetSubmitting] = useState(false);
 
-  useEffect(() => {
-    if (activeTab === "passwords") {
-      fetchMembersList();
-    }
-  }, [activeTab]);
-
-  const fetchMembersList = async () => {
-    if (isSupabaseConfigured()) {
-      try {
-        const { data } = await supabase.from("profiles").select("*").order("full_name", { ascending: true });
-        if (data) {
-          const registeredOnly = data.filter(
-            (p) => !p.member_id?.startsWith("GP-WALK-") && !p.email?.includes("@abdullahgym.local") && p.role !== "walkin"
-          );
-          setMembers(registeredOnly);
-        }
-      } catch (e) {}
-    } else {
-      setMembers([
-        { id: "m-1", full_name: "Muhammad Hamza", email: "hamza@gmail.com", member_id: "GP-8472-991", plan: "Pro Membership" },
-        { id: "m-2", full_name: "Usman Ali", email: "usman@gmail.com", member_id: "GP-5510-402", plan: "Standard Monthly Pass" },
-        { id: "m-3", full_name: "Ayesha Malik", email: "ayesha@gmail.com", member_id: "GP-1204-883", plan: "Pro Membership" },
-      ]);
-    }
-  };
-
-  const handleConfirmResetPassword = async (e) => {
-    e.preventDefault();
-    if (!resetTarget || !newMemberPass) return;
-    setResetSubmitting(true);
-
-    try {
-      const res = await fetch("/api/admin/reset-password", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userId: resetTarget.id,
-          newPassword: newMemberPass,
-        }),
-      });
-
-      const result = await res.json();
-      if (res.ok && result.success) {
-        setResetMsg(`✓ Password for ${resetTarget.full_name} updated successfully to '${newMemberPass}'!`);
-      } else {
-        setResetMsg(`Notice: Updated locally for ${resetTarget.full_name}. (${result.error || "Local mode"})`);
-      }
-    } catch (err) {
-      setResetMsg(`✓ Password for ${resetTarget.full_name} set to '${newMemberPass}'!`);
-    } finally {
-      setResetSubmitting(false);
-      setResetTarget(null);
-      setTimeout(() => setResetMsg(""), 6000);
-    }
-  };
-
-  const filteredMembers = members.filter(
-    (m) =>
-      m.full_name?.toLowerCase().includes(searchMember.toLowerCase()) ||
-      m.email?.toLowerCase().includes(searchMember.toLowerCase()) ||
-      m.member_id?.toLowerCase().includes(searchMember.toLowerCase())
-  );
 
   // --- TAB 3: GENERAL GYM CONFIGURATION & TIMINGS ---
   const [gymConfig, setGymConfig] = useState({
@@ -861,20 +806,21 @@ export default function AdminConfigurationPage() {
   };
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto font-sans">
+    <div className="space-y-6 font-sans text-slate-800">
       {/* Top Header */}
-      <div className="border-b border-slate-200 pb-4">
-        <h1 className="text-xl font-black text-slate-900 tracking-tight">Gym Plans & Member Password Manager</h1>
-        <p className="text-xs text-slate-500 mt-0.5">
-          Manage gym membership rates, add-on services, and reset member login passwords.
-        </p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
+            Gym Plans & Configurations
+          </h1>
+        </div>
       </div>
 
       {/* Tabs Bar */}
       <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-3">
         <button
           onClick={() => setActiveTab("plans")}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-extrabold transition-all ${
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
             activeTab === "plans"
               ? "bg-emerald-600 text-white shadow-xs"
               : "bg-white text-slate-600 hover:text-slate-900 border border-slate-200"
@@ -885,7 +831,7 @@ export default function AdminConfigurationPage() {
 
         <button
           onClick={() => setActiveTab("geofence")}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-extrabold transition-all ${
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
             activeTab === "geofence"
               ? "bg-emerald-600 text-white shadow-xs"
               : "bg-white text-slate-600 hover:text-slate-900 border border-slate-200"
@@ -896,24 +842,13 @@ export default function AdminConfigurationPage() {
 
         <button
           onClick={() => setActiveTab("accounts")}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-extrabold transition-all ${
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
             activeTab === "accounts"
               ? "bg-emerald-600 text-white shadow-xs"
               : "bg-white text-slate-600 hover:text-slate-900 border border-slate-200"
           }`}
         >
           <span>🏦</span> Payment Account Details
-        </button>
-
-        <button
-          onClick={() => setActiveTab("passwords")}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-extrabold transition-all ${
-            activeTab === "passwords"
-              ? "bg-emerald-600 text-white shadow-xs"
-              : "bg-white text-slate-600 hover:text-slate-900 border border-slate-200"
-          }`}
-        >
-          <span>🔑</span> Reset Member Passwords
         </button>
       </div>
 
@@ -927,13 +862,10 @@ export default function AdminConfigurationPage() {
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
                 <h2 className="text-base font-extrabold text-slate-900">Gym Base Membership Plans</h2>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Set monthly subscription rates and daily pass prices for members.
-                </p>
               </div>
               <button
                 onClick={handleOpenAddModal}
-                className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl transition flex items-center gap-2 self-start sm:self-auto shadow-xs"
+                className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl transition flex items-center gap-2 self-start sm:self-auto shadow-xs cursor-pointer"
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
@@ -1043,27 +975,14 @@ export default function AdminConfigurationPage() {
           <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-5">
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
               <div>
-                <div className="flex items-center gap-2">
-                  <h3 className="text-base font-extrabold text-slate-900">
-                    Stackable Add-On Services
-                  </h3>
-                  <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200 font-mono">
-                    Active Services
-                  </span>
-                </div>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Create and manage separate add-on service fees (e.g. Cardio, Personal Trainer, VIP Locker, Sauna Pass).
-                </p>
-                {addonStatusMsg && (
-                  <p className="text-[11px] font-bold text-emerald-800 mt-1 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 inline-block font-mono">
-                    {addonStatusMsg}
-                  </p>
-                )}
+                <h3 className="text-base font-extrabold text-slate-900">
+                  Stackable Add-On Services
+                </h3>
               </div>
 
               <button
                 onClick={handleOpenAddAddonModal}
-                className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl transition shadow-xs flex items-center gap-2 shrink-0"
+                className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl transition shadow-xs flex items-center gap-2 shrink-0 cursor-pointer"
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
@@ -1144,9 +1063,6 @@ export default function AdminConfigurationPage() {
         <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-5">
           <div>
             <h2 className="text-base font-extrabold text-slate-900">Member Password Management</h2>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Reset member credentials for mobile app access in Supabase.
-            </p>
           </div>
 
           {resetMsg && (
@@ -1234,11 +1150,8 @@ export default function AdminConfigurationPage() {
             <div className="flex items-center justify-between border-b border-slate-100 pb-4">
               <div>
                 <h2 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
-                  <span>📍</span> GPS Geofencing & Location Enforcement
+                  <span>📍</span> GPS Geofencing Settings
                 </h2>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Configure the gym's physical GPS location coordinates and check-in radius.
-                </p>
               </div>
               <span
                 className={`text-[10px] font-mono font-bold px-2.5 py-1 rounded-full border ${
@@ -1355,23 +1268,12 @@ export default function AdminConfigurationPage() {
                 <h2 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
                   <span>🏦</span> Member Fee Payment Account Details
                 </h2>
-                <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200 font-mono">
-                  {accounts.filter((a) => a.active).length} Active Accounts
-                </span>
               </div>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Set up multiple accounts (JazzCash, EasyPaisa, Meezan Bank, HBL) for members to send fee payments.
-              </p>
-              {accountStatusMsg && (
-                <p className="text-[11px] font-bold text-emerald-800 mt-1 bg-emerald-50 px-2.5 py-0.5 rounded border border-emerald-200 inline-block font-mono">
-                  {accountStatusMsg}
-                </p>
-              )}
             </div>
 
             <button
               onClick={handleOpenAddAccountModal}
-              className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl transition shadow-xs flex items-center gap-2 shrink-0"
+              className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl transition shadow-xs flex items-center gap-2 shrink-0 cursor-pointer"
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
@@ -1492,6 +1394,22 @@ export default function AdminConfigurationPage() {
                   <option value="Bank Transfer">Bank Transfer (Other)</option>
                 </select>
               </div>
+
+              {(accProvider === "Bank Transfer" || accProvider === "Other Bank") && (
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 uppercase mb-1">
+                    Specific Bank Name *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={accCustomBank}
+                    onChange={(e) => setAccCustomBank(e.target.value)}
+                    placeholder="e.g. Bank Alfalah, Faysal Bank, Allied Bank"
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-emerald-500 font-bold"
+                  />
+                </div>
+              )}
 
               <div>
                 <label className="block text-xs font-bold text-slate-600 uppercase mb-1">
@@ -1734,68 +1652,10 @@ export default function AdminConfigurationPage() {
         </div>
       )}
 
-      {/* MODAL 3: RESET PASSWORD CONFIRMATION */}
-      {resetTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
-          <div className="bg-white border border-slate-200 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl text-slate-900">
-            <div className="flex items-center justify-between border-b border-slate-200 pb-3">
-              <div>
-                <h3 className="text-base font-extrabold text-slate-900">Reset Member Password</h3>
-                <p className="text-[11px] text-slate-500">Sets new password for member mobile app login.</p>
-              </div>
-              <button onClick={() => setResetTarget(null)} className="text-slate-400 hover:text-slate-700 font-bold text-sm cursor-pointer hover:bg-slate-100 p-1.5 rounded-lg transition">
-                ✕
-              </button>
-            </div>
-
-            <form onSubmit={handleConfirmResetPassword} className="space-y-4">
-              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs space-y-1">
-                <p className="text-slate-500">Member:</p>
-                <p className="font-extrabold text-slate-900">{resetTarget.full_name}</p>
-                <p className="text-[11px] text-emerald-700 font-mono font-bold">{resetTarget.email}</p>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-emerald-700 uppercase mb-1">
-                  New Password *
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={newMemberPass}
-                  onChange={(e) => setNewMemberPass(e.target.value)}
-                  className="w-full bg-emerald-50/50 border border-emerald-300 rounded-xl px-3.5 py-2.5 text-xs text-emerald-800 font-mono font-bold focus:outline-none focus:border-emerald-500"
-                />
-              </div>
-
-              <div className="pt-3 border-t border-slate-200 flex justify-end gap-3">
-                <button
-                  type="button"
-                  onClick={() => setResetTarget(null)}
-                  className="px-4 py-2 bg-slate-100 text-xs font-bold text-slate-700 rounded-xl hover:bg-slate-200"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={resetSubmitting}
-                  className="px-5 py-2 bg-emerald-600 text-xs font-bold text-white rounded-xl hover:bg-emerald-700 shadow-xs"
-                >
-                  {resetSubmitting ? "Updating..." : "Confirm Password Update"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* REUSABLE CUSTOM DIALOG MODAL */}
-      <CustomDialogModal {...dialogConfig} />
-
       {/* REUSABLE LOADING ANIMATION OVERLAY */}
       <LoadingOverlay
-        isLoading={resetSubmitting || detectingGps}
-        message={detectingGps ? "Detecting GPS Coordinates..." : "Updating Member Password..."}
+        isLoading={detectingGps}
+        message="Detecting GPS Coordinates..."
       />
     </div>
   );

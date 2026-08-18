@@ -10,7 +10,7 @@ export const UpcomingRenewalCard = ({
   status = 'Active',
   onRenewPress,
 }) => {
-  const isDeactivated = status === 'Inactive' || status === 'Deactivated' || overdueDays > 7;
+  const isDeactivated = status === 'Suspended' || status === 'Inactive' || status === 'Deactivated' || overdueDays > 7;
 
   // Active Period (>10 days remaining & 0 overdue): Keep dashboard clean
   if (daysRemaining > 10 && overdueDays === 0 && !isDeactivated) {

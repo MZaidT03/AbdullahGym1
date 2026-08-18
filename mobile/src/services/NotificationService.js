@@ -135,7 +135,7 @@ export const NotificationService = {
     }
 
     // 2. Account Expired / Deactivated (>7 days)
-    if (overdueDays > 7 || user.status === 'Expired' || user.status === 'Deactivated') {
+    if (overdueDays > 7 || user.status === 'Expired' || user.status === 'Suspended' || user.status === 'Deactivated' || user.status === 'Inactive') {
       return await this.addNotification({
         title: '🔒 Account Expired / Deactivated',
         message: 'Your 7-day grace period has ended. Submit your monthly payment in the Payments tab to reactivate check-in access.',

@@ -296,7 +296,37 @@ export default function AdminDashboardPage() {
     { day: "Sun", amount: 12000 },
   ]);
 
+  // Admin User Profile state
+  const [adminName, setAdminName] = useState("Abdullah Manager");
+
   useEffect(() => {
+    if (typeof window !== "undefined") {
+      const savedName = localStorage.getItem("admin_name");
+      if (savedName) setAdminName(savedName);
+    }
+
+    const fetchAdminName = async () => {
+      if (isSupabaseConfigured()) {
+        try {
+          const { data: sessionData } = await supabase.auth.getSession();
+          if (sessionData?.session?.user) {
+            const { data: profile } = await supabase
+              .from("profiles")
+              .select("full_name")
+              .eq("id", sessionData.session.user.id)
+              .single();
+
+            if (profile && profile.full_name) {
+              setAdminName(profile.full_name);
+            }
+          }
+        } catch (e) {
+          console.warn("Fetch admin name notice:", e);
+        }
+      }
+    };
+
+    fetchAdminName();
     loadDashboardData();
   }, []);
 
@@ -553,21 +583,12 @@ export default function AdminDashboardPage() {
 
   return (
     <div className="space-y-8 max-w-7xl mx-auto font-sans p-2 sm:p-4 text-slate-800">
-      {/* HEADER BANNER */}
+      {/* HEADER BANNER - CLEAN LAYOUT */}
       <div className="relative overflow-hidden bg-gradient-to-r from-slate-900 via-slate-800 to-emerald-950 rounded-3xl p-6 sm:p-8 shadow-md border border-slate-800 text-white flex flex-col lg:flex-row lg:items-center justify-between gap-6">
         <div className="space-y-1.5 z-10">
-          <div className="flex items-center gap-2">
-            <span className="bg-emerald-500/20 text-emerald-300 text-[11px] font-bold px-2.5 py-0.5 rounded-full border border-emerald-500/30 backdrop-blur-md">
-              Abdullah Gym Portal
-            </span>
-            <span className="text-slate-400 text-xs">• Live Manager Dashboard</span>
-          </div>
           <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
-            Welcome back, Manager 👋
+            Welcome back, {adminName} 👋
           </h1>
-          <p className="text-xs sm:text-sm text-slate-300 max-w-xl">
-            Here is your daily gym overview for active members, collections, and check-in desk logs.
-          </p>
         </div>
 
         {/* Quick Action Navigation */}

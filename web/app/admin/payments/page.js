@@ -39,15 +39,13 @@ function MetricStatCard({
 function StatusBadge({ status }) {
   const styles = {
     Paid: "bg-emerald-50 text-emerald-700 border-emerald-200/80",
-    Partial: "bg-amber-50 text-amber-800 border-amber-200/80",
     "Pending Approval": "bg-indigo-50 text-indigo-700 border-indigo-200/80 animate-pulse",
     Rejected: "bg-rose-50 text-rose-700 border-rose-200/80 font-bold",
     Unpaid: "bg-rose-50 text-rose-700 border-rose-200/80",
   };
 
   const labels = {
-    Paid: "✓ Fully Paid",
-    Partial: "⚡ Partial",
+    Paid: "✓ Paid",
     "Pending Approval": "⏳ Pending Approval",
     Rejected: "✕ Rejected",
     Unpaid: "🔴 Unpaid",
@@ -57,8 +55,9 @@ function StatusBadge({ status }) {
 
   return (
     <span
-      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${styles[key] || styles.Unpaid
-        }`}
+      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
+        styles[key] || styles.Unpaid
+      }`}
     >
       {labels[key] || labels.Unpaid}
     </span>
@@ -87,6 +86,7 @@ export default function PaymentsAdminPage() {
   const [amount, setAmount] = useState("5000");
   const [totalFee, setTotalFee] = useState("5000");
   const [method, setMethod] = useState("Cash / Desk");
+  const [customBankName, setCustomBankName] = useState("");
   const [statusMsg, setStatusMsg] = useState("");
 
   const [activeInvoice, setActiveInvoice] = useState(null);
@@ -165,28 +165,14 @@ export default function PaymentsAdminPage() {
               }
             }
 
-            let remainingDue = isWalkIn ? 0 : Math.max(0, tFee - amt);
             let calculatedStatus = "Unpaid";
 
             if (item.status === "Rejected") {
               calculatedStatus = "Rejected";
-              remainingDue = tFee;
             } else if (item.status === "Pending Approval" || item.proof_url) {
               calculatedStatus = "Pending Approval";
-              remainingDue = tFee;
-            } else if (item.status === "Paid") {
+            } else if (item.status === "Paid" || amt > 0 || isWalkIn) {
               calculatedStatus = "Paid";
-              remainingDue = 0;
-            } else if (item.status === "Partial") {
-              calculatedStatus = "Partial";
-            } else if (isWalkIn) {
-              calculatedStatus = "Paid";
-              remainingDue = 0;
-            } else if (amt >= tFee) {
-              calculatedStatus = "Paid";
-              remainingDue = 0;
-            } else if (amt > 0) {
-              calculatedStatus = "Partial";
             } else {
               calculatedStatus = "Unpaid";
             }
@@ -197,13 +183,11 @@ export default function PaymentsAdminPage() {
               invoice_id: item.invoice_id || `INV-${item.id.slice(0, 4)}`,
               member_name: prof?.full_name || item.member_name || "Gym Member",
               member_id: prof?.member_id || (isWalkIn ? "GP-WALK-GUEST" : "GP-MEMBER"),
-              plan: isWalkIn ? "Daily Walk-In Pass" : prof?.plan || "Pro Membership",
+              plan: isWalkIn ? "Daily Walk-In Pass" : prof?.plan || "Standard Membership",
               raw_amount: amt,
               raw_total_fee: tFee,
-              raw_remaining: remainingDue,
               amount: `PKR ${Number(amt).toLocaleString()}`,
               total_fee: `PKR ${Number(tFee).toLocaleString()}`,
-              remaining: `PKR ${Number(remainingDue).toLocaleString()}`,
               date: item.date
                 ? new Date(item.date).toLocaleDateString([], {
                   month: "short",
@@ -234,33 +218,14 @@ export default function PaymentsAdminPage() {
           invoice_id: "INV-8492",
           member_name: "Muhammad Hamza",
           member_id: "GP-8472-991",
-          plan: "Pro Membership",
-          raw_amount: 5000,
-          raw_total_fee: 5000,
-          raw_remaining: 0,
-          amount: "PKR 5,000",
-          total_fee: "PKR 5,000",
-          remaining: "PKR 0",
+          plan: "Standard Membership",
+          raw_amount: 1600,
+          raw_total_fee: 1600,
+          amount: "PKR 1,600",
+          total_fee: "PKR 1,600",
           date: "Aug 12, 2026",
           method: "Cash / Desk",
           status: "Paid",
-        },
-        {
-          id: "p-2",
-          user_id: "m-2",
-          invoice_id: "INV-3310",
-          member_name: "Usman Ali",
-          member_id: "GP-5510-402",
-          plan: "Standard Pass",
-          raw_amount: 2000,
-          raw_total_fee: 3500,
-          raw_remaining: 1500,
-          amount: "PKR 2,000",
-          total_fee: "PKR 3,500",
-          remaining: "PKR 1,500",
-          date: "Aug 11, 2026",
-          method: "Bank Transfer",
-          status: "Partial",
         },
       ]);
     }
@@ -461,6 +426,11 @@ export default function PaymentsAdminPage() {
     const remainingDue = isWalkInPayment ? 0 : Math.max(0, actualTotalFee - numericAmount);
     const finalStatus = isWalkInPayment ? "Paid" : remainingDue === 0 ? "Paid" : "Partial";
 
+    const effectiveMethod =
+      (method === "Other Banks" || method === "Other Bank" || method === "Bank Transfer") && customBankName.trim()
+        ? `Bank Transfer (${customBankName.trim()})`
+        : method;
+
     if (isSupabaseConfigured()) {
       try {
         if (isWalkInPayment) {
@@ -483,7 +453,7 @@ export default function PaymentsAdminPage() {
             amount: numericAmount,
             total_fee: actualTotalFee,
             status: finalStatus,
-            payment_method: method,
+            payment_method: effectiveMethod,
             invoice_id: isWalkInPayment ? `INV-WALK-${Math.floor(1000 + Math.random() * 9000)}` : invId,
             date: new Date().toISOString(),
           },
@@ -512,12 +482,14 @@ export default function PaymentsAdminPage() {
         total_fee: `PKR ${Number(numericTotalFee).toLocaleString()}`,
         remaining: `PKR ${Number(remainingDue).toLocaleString()}`,
         date: new Date().toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" }),
-        method: method,
+        method: effectiveMethod,
         status: finalStatus,
       };
 
       setPayments([newPaymentLog, ...payments]);
     }
+
+    setCustomBankName("");
 
     setStatusMsg(
       `✓ Payment of PKR ${Number(numericAmount).toLocaleString()} recorded for ${targetName}!`
@@ -537,7 +509,7 @@ export default function PaymentsAdminPage() {
   };
 
   const resolveBasePlanFee = (planStr) => {
-    if (!planStr) return 5000;
+    if (!planStr) return 1600;
     const cleanStr = String(planStr).trim().toLowerCase();
 
     if (availablePlans && availablePlans.length > 0) {
@@ -545,14 +517,14 @@ export default function PaymentsAdminPage() {
         (p) => p.name && cleanStr === p.name.toLowerCase()
       );
       if (exactMatch) {
-        return Number(exactMatch.monthly_price || exactMatch.monthlyPrice || exactMatch.daily_price || exactMatch.dailyPrice || 5000);
+        return Number(exactMatch.monthly_price || exactMatch.monthlyPrice || exactMatch.daily_price || exactMatch.dailyPrice || 1600);
       }
 
       const subMatch = availablePlans.find(
         (p) => p.name && (cleanStr.includes(p.name.toLowerCase()) || p.name.toLowerCase().includes(cleanStr))
       );
       if (subMatch) {
-        return Number(subMatch.monthly_price || subMatch.monthlyPrice || subMatch.daily_price || subMatch.dailyPrice || 5000);
+        return Number(subMatch.monthly_price || subMatch.monthlyPrice || subMatch.daily_price || subMatch.dailyPrice || 1600);
       }
     }
 
@@ -564,16 +536,20 @@ export default function PaymentsAdminPage() {
 
     if (cleanStr.includes("pro plus") || cleanStr.includes("pro+")) return 12000;
     if (cleanStr.includes("vip") || cleanStr.includes("champion")) return 9000;
-    if (cleanStr.includes("standard")) return 3500;
+    if (cleanStr.includes("standard")) return 1600;
     if (cleanStr.includes("daily") || cleanStr.includes("visitor")) return 500;
-    return 5000;
+    return 1600;
   };
 
   const getMemberPaymentInfo = (memberId) => {
     const member = members.find((m) => m.id === memberId);
-    const mPlanName = member?.plan || "Pro Membership";
+    const mPlanName = member?.plan || "Standard Membership";
     
-    let fee = resolveBasePlanFee(mPlanName);
+    let fee = (member?.fee_paid && Number(member.fee_paid) > 0)
+      ? Number(member.fee_paid)
+      : (member?.total_fee && Number(member.total_fee) > 0)
+      ? Number(member.total_fee)
+      : resolveBasePlanFee(mPlanName);
 
     const userPayments = payments.filter((p) => p.user_id === memberId);
     const paidPayments = userPayments.filter((p) => p.status === "Paid");
@@ -581,26 +557,35 @@ export default function PaymentsAdminPage() {
 
     const pendingPay = userPayments.find((p) => p.status === "Pending Approval" || p.proof_url);
     const hasRejectedOnly = userPayments.length > 0 && userPayments.every((p) => p.status === "Rejected");
-    const remaining = Math.max(0, fee - (paidPayments.length > 0 ? fee : sumPaid));
+
+    const isExpired =
+      member?.status === "Expired" ||
+      (member?.days_remaining !== undefined && member?.days_remaining !== null && Number(member.days_remaining) <= 0);
 
     let st = "Unpaid";
-    if (pendingPay) st = "Pending Approval";
-    else if (paidPayments.length > 0) st = "Paid";
-    else if (sumPaid > 0) st = "Partial";
-    else if (hasRejectedOnly) st = "Rejected";
-    else if (member?.status === "Active" && userPayments.length === 0) st = "Paid";
+    if (pendingPay) {
+      st = "Pending Approval";
+    } else if (isExpired) {
+      st = "Unpaid";
+    } else if (hasRejectedOnly) {
+      st = "Rejected";
+    } else if (paidPayments.length > 0 || sumPaid > 0) {
+      st = "Paid";
+    } else if (member?.status === "Active") {
+      st = "Paid";
+    }
 
     const proofUrl = pendingPay?.proof_url || userPayments.find((p) => p.proof_url)?.proof_url || member?.proof_url || null;
 
     return {
       status: st,
-      paid: sumPaid,
+      paid: st === "Paid" ? (sumPaid > 0 ? sumPaid : fee) : 0,
       total_fee: fee,
-      remaining: remaining,
       proof_url: proofUrl,
-      payment_id: pendingPay?.id || userPayments[0]?.id || null,
-      method: pendingPay?.method || userPayments[0]?.method || "Desk Collection",
-      invoice_id: pendingPay?.invoice_id || userPayments[0]?.invoice_id || "INV-MEM",
+      payment_id: pendingPay?.id || paidPayments[0]?.id || userPayments[0]?.id || null,
+      method: pendingPay?.method || paidPayments[0]?.method || userPayments[0]?.method || "Cash / Desk",
+      invoice_id: pendingPay?.invoice_id || paidPayments[0]?.invoice_id || userPayments[0]?.invoice_id || "INV-MEM",
+      is_expired: isExpired,
     };
   };
 
@@ -634,9 +619,9 @@ export default function PaymentsAdminPage() {
 
       const info = getMemberPaymentInfo(m.id);
       if (statusFilter === "Paid" && info.status !== "Paid") return false;
-      if (statusFilter === "Partial" && info.status !== "Partial") return false;
       if (statusFilter === "Unpaid" && info.status !== "Unpaid") return false;
       if (statusFilter === "Pending Approval" && info.status !== "Pending Approval") return false;
+      if (statusFilter === "Rejected" && info.status !== "Rejected") return false;
       return true;
     });
   }, [members, searchTerm, statusFilter, payments, availablePlans]);
@@ -644,41 +629,39 @@ export default function PaymentsAdminPage() {
   const totalRevenue = useMemo(
     () =>
       payments
-        .filter((p) => p.status === "Paid" || p.status === "Partial")
+        .filter((p) => p.status === "Paid")
         .reduce((acc, p) => acc + (p.raw_amount || 0), 0),
     [payments]
   );
 
   const paidCount = useMemo(() => payments.filter((p) => p.status === "Paid").length, [payments]);
-  const partialCount = useMemo(() => payments.filter((p) => p.status === "Partial").length, [payments]);
   const unpaidCount = useMemo(
     () => members.filter((m) => getMemberPaymentInfo(m.id).status === "Unpaid").length,
     [members, payments]
   );
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto font-sans p-2 sm:p-4 text-slate-800">
+    <div className="space-y-6 font-sans text-slate-800">
       {/* HEADER SECTION */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white border border-slate-200/80 p-5 rounded-2xl shadow-xs">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900 tracking-tight">
+          <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
             Payments & Billing
           </h1>
-          <p className="text-xs text-slate-500 mt-1">
-            Track subscription revenue, collect partial balances, and approve mobile app transfers.
-          </p>
         </div>
 
         <button
           onClick={() => {
             setSelectedMemberId("");
-            setAmount("5000");
-            setTotalFee("5000");
+            setAmount("1600");
+            setTotalFee("1600");
+            setMethod("Cash / Desk");
+            setCustomBankName("");
             setIsModalOpen(true);
           }}
-          className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition-all duration-150 shadow-xs hover:scale-[1.02] flex items-center gap-2"
+          className="inline-flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow-md shadow-emerald-600/20 transition-all active:scale-95 cursor-pointer"
         >
-          <span className="text-base font-normal">＋</span>
+          <span>＋</span>
           <span>Record Payment</span>
         </button>
       </div>
@@ -705,7 +688,7 @@ export default function PaymentsAdminPage() {
               setActiveTab("members");
               setStatusFilter("Pending Approval");
             }}
-            className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl transition-all shadow-xs shrink-0"
+            className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl transition-all shadow-xs shrink-0 cursor-pointer"
           >
             Review ({pendingApprovalsCount}) →
           </button>
@@ -714,11 +697,11 @@ export default function PaymentsAdminPage() {
 
       {/* SUCCESS NOTIFICATION */}
       {statusMsg && (
-        <div className="p-4 bg-emerald-50 border border-emerald-200/80 text-emerald-800 text-xs font-semibold rounded-2xl flex items-center justify-between shadow-xs">
+        <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold rounded-xl flex items-center justify-between shadow-2xs">
           <span>{statusMsg}</span>
           <button
             onClick={() => setStatusMsg("")}
-            className="text-slate-400 hover:text-slate-700 font-bold text-xs p-1 rounded-lg"
+            className="text-emerald-600 hover:text-emerald-800 font-bold ml-2 cursor-pointer"
           >
             ✕
           </button>
@@ -726,7 +709,7 @@ export default function PaymentsAdminPage() {
       )}
 
       {/* FINANCIAL OVERVIEW METRIC CARDS */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <MetricStatCard
           title="Total Revenue"
           value={`PKR ${Number(totalRevenue).toLocaleString()}`}
@@ -736,95 +719,81 @@ export default function PaymentsAdminPage() {
         <MetricStatCard
           title="Fully Paid"
           value={`${paidCount} Members`}
-          subtext="Cleared passes"
+          subtext="Active cleared passes"
           color="slate"
-        />
-        <MetricStatCard
-          title="Partial Payments"
-          value={`${partialCount} Members`}
-          subtext="Has balance due"
-          color="amber"
         />
         <MetricStatCard
           title="Overdue / Unpaid"
           value={`${unpaidCount} Members`}
-          subtext="Awaiting desk payment"
+          subtext="Awaiting fee payment"
           color="rose"
         />
       </div>
 
-      {/* NAVIGATION TABS & SEARCH */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="flex gap-1.5 bg-slate-100/80 p-1 rounded-xl border border-slate-200/60 shrink-0">
-          <button
-            onClick={() => {
-              setActiveTab("logs");
-              setStatusFilter("All");
-            }}
-            className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${activeTab === "logs" ? "bg-white text-slate-900 shadow-xs" : "text-slate-600 hover:text-slate-900"
+      {/* FILTER & SEARCH TOOLBAR */}
+      <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-xs space-y-3">
+        <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-center">
+          {/* Tab Switcher */}
+          <div className="sm:col-span-6 lg:col-span-5 flex bg-slate-100 p-1 rounded-xl border border-slate-200/60">
+            <button
+              onClick={() => {
+                setActiveTab("logs");
+                setStatusFilter("All");
+              }}
+              className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                activeTab === "logs" ? "bg-white text-slate-900 shadow-xs" : "text-slate-500 hover:text-slate-800"
               }`}
-          >
-            Transactions ({payments.length})
-          </button>
-
-          <button
-            onClick={() => setActiveTab("members")}
-            className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${activeTab === "members" ? "bg-white text-slate-900 shadow-xs" : "text-slate-600 hover:text-slate-900"
+            >
+              Transactions ({payments.length})
+            </button>
+            <button
+              onClick={() => setActiveTab("members")}
+              className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                activeTab === "members" ? "bg-white text-slate-900 shadow-xs" : "text-slate-500 hover:text-slate-800"
               }`}
-          >
-            Members Roster ({members.length})
-            {pendingApprovalsCount > 0 && (
-              <span className="w-2 h-2 rounded-full bg-indigo-600" />
-            )}
-          </button>
-        </div>
+            >
+              Member Fees ({members.length})
+              {pendingApprovalsCount > 0 && (
+                <span className="w-2 h-2 rounded-full bg-indigo-600" />
+              )}
+            </button>
+          </div>
 
-        {/* Search */}
-        <div className="relative w-full sm:w-72">
-          <input
-            type="text"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="Search member name or ID..."
-            className="w-full bg-white border border-slate-200 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-emerald-500 transition-all"
-          />
-          <svg
-            className="w-4 h-4 text-slate-400 absolute left-3 top-2.5"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+          {/* Search Input */}
+          <div className="sm:col-span-6 lg:col-span-7 relative">
+            <input
+              type="text"
+              placeholder={activeTab === "logs" ? "Search transactions by member, invoice..." : "Search member by name or ID..."}
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-3.5 py-2 text-xs text-slate-900 focus:outline-none focus:border-emerald-500 focus:bg-white transition-all"
             />
-          </svg>
+            <span className="absolute left-3 top-2.5 text-slate-400 text-xs">🔍</span>
+          </div>
         </div>
-      </div>
 
-      {/* FILTER CHIPS BAR */}
-      <div className="flex gap-1.5 bg-slate-100/80 p-1 rounded-xl border border-slate-200/60 shrink-0 overflow-x-auto">
-        {[
-          { key: "All", label: "Show All" },
-          { key: "Paid", label: "✓ Fully Paid" },
-          { key: "Partial", label: "⚡ Partial" },
-          { key: "Pending Approval", label: "📱 App Proofs" },
-          { key: "Rejected", label: "✕ Rejected" },
-          { key: "Unpaid", label: "🔴 Unpaid" },
-        ].map((st) => (
-          <button
-            key={st.key}
-            onClick={() => setStatusFilter(st.key)}
-            className={`px-3 py-1 rounded-lg text-xs font-bold whitespace-nowrap transition-all ${statusFilter === st.key
-              ? "bg-white text-slate-900 shadow-xs"
-              : "text-slate-600 hover:text-slate-900"
+        {/* Status Filter Chips */}
+        <div className="pt-2.5 border-t border-slate-100 flex gap-1.5 overflow-x-auto">
+          {[
+            { key: "All", label: "Show All" },
+            { key: "Paid", label: "✓ Fully Paid" },
+            { key: "Pending Approval", label: "📱 App Proofs" },
+            { key: "Rejected", label: "✕ Rejected" },
+            { key: "Unpaid", label: "🔴 Unpaid" },
+          ].map((st) => (
+            <button
+              key={st.key}
+              onClick={() => setStatusFilter(st.key)}
+              className={`px-3 py-1 rounded-lg text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
+                statusFilter === st.key
+                  ? "bg-white text-slate-900 shadow-xs border border-slate-200"
+                  : "text-slate-500 hover:text-slate-800"
               }`}
-          >
-            {st.label}
-          </button>
-        ))}
+            >
+              {st.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* TAB 1: TRANSACTIONS LOG TABLE */}
@@ -832,65 +801,58 @@ export default function PaymentsAdminPage() {
         <div className="bg-white border border-slate-200/80 rounded-2xl p-4 sm:p-5 shadow-xs overflow-hidden flex flex-col">
           <div className="overflow-auto max-h-[calc(100vh-320px)] rounded-xl border border-slate-100">
             <table className="w-full text-left border-collapse relative">
-              <thead className="sticky top-0 bg-slate-50/90 backdrop-blur-md z-10">
+              <thead className="sticky top-0 bg-slate-50/95 backdrop-blur-md z-10">
                 <tr className="border-b border-slate-200 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                  <th className="py-3 px-3.5">Invoice</th>
-                  <th className="py-3 px-3.5">Member</th>
-                  <th className="py-3 px-3.5">Amount / Fee</th>
-                  <th className="py-3 px-3.5">Remaining</th>
-                  <th className="py-3 px-3.5">Date</th>
-                  <th className="py-3 px-3.5">Method</th>
-                  <th className="py-3 px-3.5">Status</th>
-                  <th className="py-3 px-3.5 text-right">Receipt</th>
+                  <th className="py-3 px-4">Invoice</th>
+                  <th className="py-3 px-4">Member</th>
+                  <th className="py-3 px-4">Amount Paid</th>
+                  <th className="py-3 px-4">Date</th>
+                  <th className="py-3 px-4">Method</th>
+                  <th className="py-3 px-4">Status</th>
+                  <th className="py-3 px-4 text-right">Receipt</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-xs">
                 {loading ? (
                   <tr>
-                    <td colSpan={8} className="py-12 text-center text-slate-400">
+                    <td colSpan={7} className="py-12 text-center text-slate-400">
                       Loading payment records...
                     </td>
                   </tr>
                 ) : filteredPayments.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="py-12 text-center text-slate-500">
+                    <td colSpan={7} className="py-12 text-center text-slate-500">
                       No payment records found matching filter.
                     </td>
                   </tr>
                 ) : (
                   filteredPayments.map((p) => (
                     <tr key={p.id} className="hover:bg-slate-50/80 transition-colors">
-                      <td className="py-3.5 px-3.5 font-mono text-emerald-700 font-bold">
+                      <td className="py-3.5 px-4 font-mono text-emerald-700 font-bold">
                         {p.invoice_id}
                       </td>
-                      <td className="py-3.5 px-3.5 font-bold text-slate-900">
+                      <td className="py-3.5 px-4 font-bold text-slate-900">
                         {p.member_name}
                       </td>
-                      <td className="py-3.5 px-3.5">
-                        <span className="font-extrabold text-slate-900">{p.amount}</span>
-                        <span className="text-[10px] text-slate-400 block font-mono">
-                          Total: {p.total_fee}
-                        </span>
+                      <td className="py-3.5 px-4 font-extrabold text-slate-900">
+                        {p.amount}
                       </td>
-                      <td className="py-3.5 px-3.5 font-mono">
-                        {p.raw_remaining > 0 ? (
-                          <span className="font-bold text-amber-700">{p.remaining} Due</span>
-                        ) : (
-                          <span className="text-slate-400 font-medium">Cleared</span>
-                        )}
-                      </td>
-                      <td className="py-3.5 px-3.5 font-mono text-slate-500">{p.date}</td>
-                      <td className="py-3.5 px-3.5 text-slate-600 font-medium">{p.method}</td>
-                      <td className="py-3.5 px-3.5">
+                      <td className="py-3.5 px-4 font-mono text-slate-500">{p.date}</td>
+                      <td className="py-3.5 px-4 text-slate-600 font-medium">{p.method}</td>
+                      <td className="py-3.5 px-4">
                         <StatusBadge status={p.status} />
                       </td>
-                      <td className="py-3.5 px-3.5 text-right">
-                        <button
-                          onClick={() => setActiveInvoice(p)}
-                          className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg transition"
-                        >
-                          View
-                        </button>
+                      <td className="py-3.5 px-4 text-right">
+                        {p.status === "Paid" ? (
+                          <button
+                            onClick={() => setActiveInvoice(p)}
+                            className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-xs font-bold rounded-lg transition cursor-pointer"
+                          >
+                            Print Slip
+                          </button>
+                        ) : (
+                          <span className="text-[10px] text-slate-400 font-semibold">No Slip</span>
+                        )}
                       </td>
                     </tr>
                   ))
@@ -906,27 +868,26 @@ export default function PaymentsAdminPage() {
         <div className="bg-white border border-slate-200/80 rounded-2xl p-4 sm:p-5 shadow-xs overflow-hidden flex flex-col">
           <div className="overflow-auto max-h-[calc(100vh-320px)] rounded-xl border border-slate-100">
             <table className="w-full text-left border-collapse relative">
-              <thead className="sticky top-0 bg-slate-50/90 backdrop-blur-md z-10">
+              <thead className="sticky top-0 bg-slate-50/95 backdrop-blur-md z-10">
                 <tr className="border-b border-slate-200 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                  <th className="py-3 px-3.5">Member</th>
-                  <th className="py-3 px-3.5">ID</th>
-                  <th className="py-3 px-3.5">Plan Fee</th>
-                  <th className="py-3 px-3.5">Paid / Due</th>
-                  <th className="py-3 px-3.5">Status</th>
-                  <th className="py-3 px-3.5">App Screenshot</th>
-                  <th className="py-3 px-3.5 text-right">Action</th>
+                  <th className="py-3 px-4">Member</th>
+                  <th className="py-3 px-4">ID</th>
+                  <th className="py-3 px-4">Plan Fee</th>
+                  <th className="py-3 px-4">Status</th>
+                  <th className="py-3 px-4">App Screenshot</th>
+                  <th className="py-3 px-4 text-right">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-xs">
                 {loading ? (
                   <tr>
-                    <td colSpan={7} className="py-12 text-center text-slate-400">
+                    <td colSpan={6} className="py-12 text-center text-slate-400">
                       Loading registered members...
                     </td>
                   </tr>
                 ) : filteredMembers.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="py-12 text-center text-slate-500">
+                    <td colSpan={6} className="py-12 text-center text-slate-500">
                       No members match the selected criteria.
                     </td>
                   </tr>
@@ -938,44 +899,31 @@ export default function PaymentsAdminPage() {
 
                     return (
                       <tr key={m.id} className="hover:bg-slate-50/80 transition-colors">
-                        <td className="py-3.5 px-3.5 font-bold text-slate-900">
+                        <td className="py-3.5 px-4 font-bold text-slate-900">
                           <p className="text-xs font-bold leading-tight">{m.full_name}</p>
                           <p className="text-[10px] text-slate-400 font-normal">{m.email}</p>
                         </td>
 
-                        <td className="py-3.5 px-3.5 font-mono text-emerald-700 font-bold">
+                        <td className="py-3.5 px-4 font-mono text-emerald-700 font-bold">
                           {m.member_id || "GP-0000"}
                         </td>
 
-                        <td className="py-3.5 px-3.5 text-slate-600 font-medium">
-                          <p className="text-xs font-semibold text-slate-800">{m.plan || "Pro Membership"}</p>
+                        <td className="py-3.5 px-4 text-slate-600 font-medium">
+                          <p className="text-xs font-semibold text-slate-800">{m.plan || "Standard Membership"}</p>
                           <p className="text-[10px] text-slate-400 font-mono">
                             PKR {Number(info.total_fee).toLocaleString()}
                           </p>
                         </td>
 
-                        <td className="py-3.5 px-3.5 font-mono">
-                          <p className="text-xs font-bold text-emerald-700">
-                            Paid: PKR {Number(info.paid).toLocaleString()}
-                          </p>
-                          {info.remaining > 0 ? (
-                            <p className="text-[10px] font-semibold text-amber-700">
-                              Due: PKR {Number(info.remaining).toLocaleString()}
-                            </p>
-                          ) : (
-                            <p className="text-[10px] text-slate-400">No Due</p>
-                          )}
-                        </td>
-
-                        <td className="py-3.5 px-3.5">
+                        <td className="py-3.5 px-4">
                           <StatusBadge status={info.status} />
                         </td>
 
-                        <td className="py-3.5 px-3.5">
+                        <td className="py-3.5 px-4">
                           {info.proof_url ? (
                             <button
                               onClick={() => setActiveProof({ member: m, info })}
-                              className="px-2 py-0.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-[11px] font-semibold rounded border border-indigo-200 transition"
+                              className="px-2 py-0.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-[11px] font-semibold rounded border border-indigo-200 transition cursor-pointer"
                             >
                               View Proof
                             </button>
@@ -984,7 +932,7 @@ export default function PaymentsAdminPage() {
                           )}
                         </td>
 
-                        <td className="py-3.5 px-3.5 text-right">
+                        <td className="py-3.5 px-4 text-right">
                           {isPendingApproval ? (
                             <button
                               onClick={() =>
@@ -994,23 +942,45 @@ export default function PaymentsAdminPage() {
                                   info.payment_id
                                 )
                               }
-                              className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-lg transition"
+                              className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-lg transition cursor-pointer"
                             >
                               Approve
                             </button>
                           ) : isFullyPaid ? (
-                            <button
-                              disabled
-                              className="px-3 py-1 bg-slate-100 text-slate-400 border border-slate-200 text-xs font-semibold rounded-lg cursor-not-allowed"
-                            >
-                              Cleared
-                            </button>
+                            <div className="flex items-center justify-end gap-1.5">
+                              <span className="inline-block px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-bold rounded-lg">
+                                ✓ Cleared
+                              </span>
+                              <button
+                                onClick={() =>
+                                  setActiveInvoice({
+                                    id: info.payment_id || `pay-${m.id}`,
+                                    invoice_id: info.invoice_id || `INV-${m.member_id || "000"}`,
+                                    member_name: m.full_name,
+                                    plan: m.plan || "Standard Membership",
+                                    amount: `PKR ${Number(info.paid || info.total_fee).toLocaleString()}`,
+                                    date: new Date().toLocaleDateString("en-PK", { day: "2-digit", month: "short", year: "numeric" }),
+                                    method: info.method || "Cash / Desk",
+                                    status: "Paid",
+                                  })
+                                }
+                                className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition cursor-pointer"
+                                title="Print Official Payment Slip"
+                              >
+                                Print Slip
+                              </button>
+                            </div>
                           ) : (
                             <button
-                              onClick={() => handleCollectRemainingBalance(m)}
-                              className="px-3 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-xs font-bold rounded-lg transition"
+                              onClick={() => {
+                                setSelectedMemberId(m.id);
+                                setTotalFee(String(info.total_fee));
+                                setAmount(String(info.total_fee));
+                                setIsModalOpen(true);
+                              }}
+                              className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg transition shadow-2xs cursor-pointer"
                             >
-                              Collect PKR {Number(info.remaining).toLocaleString()}
+                              Collect Fee
                             </button>
                           )}
                         </td>
@@ -1031,11 +1001,11 @@ export default function PaymentsAdminPage() {
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div>
                 <h3 className="text-base font-extrabold text-slate-900">Record Payment</h3>
-                <p className="text-xs text-slate-500">Collect full or partial monthly fees.</p>
+                <p className="text-xs text-slate-500">Record membership fee payment.</p>
               </div>
               <button
                 onClick={() => setIsModalOpen(false)}
-                className="text-slate-400 hover:text-slate-700 font-bold text-sm p-1.5 rounded-lg"
+                className="text-slate-400 hover:text-slate-700 font-bold text-sm p-1.5 rounded-lg cursor-pointer"
               >
                 ✕
               </button>
@@ -1059,28 +1029,22 @@ export default function PaymentsAdminPage() {
                       const found = members.find((m) => m.id === val);
                       if (found) {
                         const mPlan = found.plan || "";
-                        const matched = availablePlans.find((p) => mPlan.includes(p.name));
-                        const mRate = matched
-                          ? matched.monthly_price || matched.monthlyPrice || 5000
-                          : 5000;
-                        setTotalFee(String(mRate));
-
-                        const info = getMemberPaymentInfo(found.id);
-                        if (info.remaining > 0) setAmount(String(info.remaining));
-                        else setAmount(String(mRate));
+                        const feeRate = resolveBasePlanFee(mPlan);
+                        setTotalFee(String(feeRate));
+                        setAmount(String(feeRate));
                       }
                     }
                   }}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs text-slate-900 font-bold focus:outline-none focus:border-emerald-500"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs text-slate-900 font-bold focus:outline-none focus:border-emerald-500 focus:bg-white"
                 >
                   <option value="">-- Select Member --</option>
                   {members.map((m) => {
                     const info = getMemberPaymentInfo(m.id);
-                    const isFullyPaid = info.status === "Paid" || info.remaining <= 0;
+                    const isFullyPaid = info.status === "Paid";
                     return (
                       <option key={m.id} value={m.id} disabled={isFullyPaid}>
-                        {m.full_name} ({m.plan || "Pro Membership"}){" "}
-                        {isFullyPaid ? "— Cleared" : `(Due: PKR ${Number(info.remaining).toLocaleString()})`}
+                        {m.full_name} ({m.plan || "Standard Membership"}){" "}
+                        {isFullyPaid ? "— Cleared" : `(Fee: PKR ${Number(info.total_fee).toLocaleString()})`}
                       </option>
                     );
                   })}
@@ -1099,37 +1063,25 @@ export default function PaymentsAdminPage() {
                     value={customGuestName}
                     onChange={(e) => setCustomGuestName(e.target.value)}
                     placeholder="e.g. Ahmad Ali"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs text-slate-900 focus:outline-none focus:border-emerald-500"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs text-slate-900 focus:outline-none focus:border-emerald-500 focus:bg-white font-bold"
                   />
                 </div>
               )}
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">
-                    Plan Total (PKR) *
-                  </label>
-                  <input
-                    type="number"
-                    required
-                    value={totalFee}
-                    onChange={(e) => setTotalFee(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs text-slate-900 font-mono focus:outline-none focus:border-emerald-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">
-                    Amount Paid *
-                  </label>
-                  <input
-                    type="number"
-                    required
-                    value={amount}
-                    onChange={(e) => setAmount(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs text-slate-900 font-mono font-bold focus:outline-none focus:border-emerald-500"
-                  />
-                </div>
+              <div>
+                <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">
+                  Payment Amount (PKR) *
+                </label>
+                <input
+                  type="number"
+                  required
+                  value={amount}
+                  onChange={(e) => {
+                    setAmount(e.target.value);
+                    setTotalFee(e.target.value);
+                  }}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs text-slate-900 font-mono font-bold focus:outline-none focus:border-emerald-500 focus:bg-white"
+                />
               </div>
 
               <div>
@@ -1138,30 +1090,54 @@ export default function PaymentsAdminPage() {
                 </label>
                 <select
                   value={method}
-                  onChange={(e) => setMethod(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs text-slate-900 font-semibold focus:outline-none focus:border-emerald-500"
+                  onChange={(e) => {
+                    setMethod(e.target.value);
+                    if (e.target.value !== "Other Banks" && e.target.value !== "Other Bank") {
+                      setCustomBankName("");
+                    }
+                  }}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs text-slate-900 font-bold focus:outline-none focus:border-emerald-500 focus:bg-white"
                 >
-                  <option value="Cash / Desk">Cash Desk</option>
-                  <option value="EasyPaisa">EasyPaisa</option>
-                  <option value="JazzCash">JazzCash</option>
-                  <option value="Bank Transfer">Bank Transfer</option>
+                  <option value="Cash / Desk">💵 Cash at Desk</option>
+                  <option value="EasyPaisa">📲 EasyPaisa</option>
+                  <option value="JazzCash">📱 JazzCash</option>
+                  <option value="Meezan Bank">🏦 Meezan Bank</option>
+                  <option value="HBL Bank">🏦 HBL Bank</option>
+                  <option value="Bank Transfer">🏦 Bank Transfer</option>
+                  <option value="Other Banks">🏦 Other Banks (Custom)</option>
                 </select>
               </div>
+
+              {(method === "Other Banks" || method === "Other Bank") && (
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">
+                    Bank Name *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={customBankName}
+                    onChange={(e) => setCustomBankName(e.target.value)}
+                    placeholder="e.g. Bank Alfalah, Allied Bank, UBL, Faysal Bank"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs text-slate-900 font-bold focus:outline-none focus:border-emerald-500 focus:bg-white"
+                  />
+                </div>
+              )}
 
               <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-3">
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}
-                  className="text-xs text-slate-500 hover:text-slate-800 px-3.5 py-2 rounded-xl font-semibold"
+                  className="px-4 py-2 bg-slate-100 text-xs font-bold text-slate-700 rounded-xl hover:bg-slate-200 cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={submitting}
-                  className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-4 py-2 rounded-xl transition-all shadow-xs"
+                  className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow-md shadow-emerald-600/20 transition-all active:scale-95 cursor-pointer"
                 >
-                  {submitting ? "Saving..." : "Save Payment"}
+                  {submitting ? "Saving..." : "✓ Record Payment"}
                 </button>
               </div>
             </form>
@@ -1215,19 +1191,13 @@ export default function PaymentsAdminPage() {
                 </div>
               </div>
 
-              <div className="p-3 bg-slate-900 text-white rounded-xl space-y-1">
+              <div className="p-3.5 bg-slate-900 text-white rounded-xl">
                 <div className="flex justify-between items-center">
-                  <span className="text-slate-400">Total Paid:</span>
+                  <span className="text-slate-400 font-medium">Total Paid:</span>
                   <span className="font-mono text-emerald-400 font-bold text-base">
                     {activeInvoice.amount}
                   </span>
                 </div>
-                {activeInvoice.raw_remaining > 0 && (
-                  <div className="flex justify-between items-center pt-1 border-t border-slate-800 text-amber-400">
-                    <span>Remaining Due:</span>
-                    <span className="font-mono font-bold">{activeInvoice.remaining}</span>
-                  </div>
-                )}
               </div>
 
               {/* Developer Attribution Footer */}
@@ -1247,16 +1217,22 @@ export default function PaymentsAdminPage() {
             <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-3">
               <button
                 onClick={() => setActiveInvoice(null)}
-                className="text-xs text-slate-500 hover:text-slate-800 px-3 py-2 rounded-xl font-semibold"
+                className="text-xs text-slate-500 hover:text-slate-800 px-3 py-2 rounded-xl font-semibold cursor-pointer"
               >
                 Close
               </button>
-              <button
-                onClick={() => window.print()}
-                className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-4 py-2 rounded-xl transition-all shadow-xs"
-              >
-                Print Receipt
-              </button>
+              {activeInvoice.status === "Paid" ? (
+                <button
+                  onClick={() => window.print()}
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-4 py-2 rounded-xl transition-all shadow-xs cursor-pointer"
+                >
+                  Print Slip / Receipt
+                </button>
+              ) : (
+                <span className="text-[11px] font-bold text-rose-600 bg-rose-50 border border-rose-200 px-3 py-1.5 rounded-xl">
+                  ⚠️ Slip Unavailable (Unpaid / Rejected)
+                </span>
+              )}
             </div>
           </div>
         </div>

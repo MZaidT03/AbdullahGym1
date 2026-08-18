@@ -20,13 +20,17 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   member_id TEXT UNIQUE,
   plan TEXT DEFAULT 'Pro Membership',
   days_remaining INTEGER DEFAULT 30,
-  status TEXT DEFAULT 'Active' CHECK (status IN ('Active', 'Expired', 'Pending', 'Suspended')),
+  status TEXT DEFAULT 'Active' CHECK (status IN ('Active', 'Inactive', 'Deactivated', 'Expired', 'Pending', 'Suspended')),
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- Migration for existing database tables:
 ALTER TABLE IF EXISTS public.profiles ADD COLUMN IF NOT EXISTS gender TEXT DEFAULT 'Male';
+
+-- Update status CHECK constraint on profiles to support all active & inactive states
+ALTER TABLE IF EXISTS public.profiles DROP CONSTRAINT IF EXISTS profiles_status_check;
+ALTER TABLE IF EXISTS public.profiles ADD CONSTRAINT profiles_status_check CHECK (status IN ('Active', 'Inactive', 'Deactivated', 'Expired', 'Pending', 'Suspended'));
 
 -- Enable RLS for Profiles
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;

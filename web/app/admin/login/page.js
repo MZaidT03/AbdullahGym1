@@ -85,17 +85,23 @@ export default function AdminLoginPage() {
     }
 
     if (!email.trim() || !password.trim()) {
-      setErrorMsg("Please provide both admin email and password.");
+      setErrorMsg("Please provide both username and password.");
       return;
     }
 
     setLoading(true);
 
+    let loginEmail = email.trim().toLowerCase();
+    if (!loginEmail.includes("@")) {
+      if (loginEmail === "admin") loginEmail = "admin@abdullahgym.com";
+      else loginEmail = `${loginEmail}@abdullahgym.com`;
+    }
+
     if (isSupabaseConfigured()) {
       try {
         // 1. Authenticate with Supabase Auth
         const { data, error } = await supabase.auth.signInWithPassword({
-          email: email.trim().toLowerCase(),
+          email: loginEmail,
           password: password,
         });
 
@@ -105,17 +111,33 @@ export default function AdminLoginPage() {
           return;
         }
 
-        // 2. Strict Role Verification in Database
+        // 2. Strict Role & Status Verification in Database
         const { data: profile, error: profErr } = await supabase
           .from("profiles")
-          .select("role")
+          .select("role, status")
           .eq("id", data.user.id)
           .single();
 
         if (profErr || !profile || profile.role !== "admin") {
           // Reject non-admin users immediately & sign out session
           await supabase.auth.signOut();
-          setErrorMsg("⛔ Access Denied: Only registered System Administrators can access this portal.");
+          setErrorMsg("⛔ Access Denied: Only registered Administrators can access this portal.");
+          handleFailedAttempt();
+          setLoading(false);
+          return;
+        }
+
+        if (profile.status === "Suspended") {
+          await supabase.auth.signOut();
+          setErrorMsg("⛔ Account Suspended: Your administrator account has been suspended.");
+          handleFailedAttempt();
+          setLoading(false);
+          return;
+        }
+
+        if (profile.status === "Expired") {
+          await supabase.auth.signOut();
+          setErrorMsg("⛔ Account Expired: Your administrator account access has expired.");
           handleFailedAttempt();
           setLoading(false);
           return;
@@ -131,7 +153,7 @@ export default function AdminLoginPage() {
         return;
       } catch (err) {
         console.error("Auth Exception:", err);
-        setErrorMsg("Authentication service unavailable. Please check internet connection.");
+        setErrorMsg("Authentication service unavailable. Please check your network connection.");
       }
     } else {
       setErrorMsg("Database connection is not configured yet in .env.local.");
@@ -147,42 +169,86 @@ export default function AdminLoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-white flex flex-col justify-center items-center px-4 py-12 font-sans relative text-slate-800">
-      {/* Main Login Card */}
-      <div className="w-full max-w-md bg-white border border-slate-200/90 rounded-3xl p-8 sm:p-9 shadow-lg sm:shadow-xl">
-        {/* Brand Header */}
-        <div className="flex flex-col items-center text-center mb-8">
-          <div className="w-14 h-14 bg-gradient-to-br from-slate-900 to-emerald-950 rounded-2xl flex items-center justify-center mb-4 shadow-lg text-white border border-slate-800">
-            <svg
-              className="w-8 h-8 text-emerald-400"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"
+    <div className="min-h-screen bg-gradient-to-b from-slate-100 via-slate-50 to-slate-100 flex flex-col justify-center items-center px-4 py-12 font-sans relative text-slate-800 overflow-hidden select-none">
+      {/* Dynamic Keyframes for Cool 3D Micro-Animations */}
+      <style jsx global>{`
+        @keyframes float3D {
+          0%, 100% {
+            transform: translateY(0px) rotate(0deg);
+          }
+          50% {
+            transform: translateY(-7px) rotate(1deg);
+          }
+        }
+        @keyframes pulseAura {
+          0%, 100% {
+            opacity: 0.35;
+            transform: scale(1);
+          }
+          50% {
+            opacity: 0.7;
+            transform: scale(1.1);
+          }
+        }
+        @keyframes subtleCardEntrance {
+          0% {
+            opacity: 0;
+            transform: translateY(16px) scale(0.98);
+          }
+          100% {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+          }
+        }
+        .animate-float-logo {
+          animation: float3D 4s ease-in-out infinite;
+        }
+        .animate-aura-glow {
+          animation: pulseAura 5s ease-in-out infinite;
+        }
+        .animate-card-entrance {
+          animation: subtleCardEntrance 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+      `}</style>
+
+      {/* 3D Background Decorative Ambient Orbs */}
+      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-emerald-500/12 rounded-full blur-3xl pointer-events-none animate-aura-glow" />
+      <div className="absolute bottom-1/4 left-1/2 -translate-x-1/2 translate-y-1/3 w-80 h-80 bg-teal-500/10 rounded-full blur-3xl pointer-events-none" />
+
+      {/* 3D Elevated Main Login Card with Entrance Animation */}
+      <div className="w-full max-w-md bg-white/95 backdrop-blur-xl border border-slate-200/90 rounded-3xl p-8 sm:p-10 shadow-[0_25px_60px_-15px_rgba(0,0,0,0.14),0_10px_25px_-5px_rgba(0,0,0,0.06),inset_0_1px_1px_rgba(255,255,255,0.9)] relative z-10 animate-card-entrance">
+        {/* Brand Header with 3D Floating Logo Badge */}
+        <div className="flex flex-col items-center text-center mb-7">
+          <div className="relative group mb-3.5">
+            {/* Animated 3D Aura Behind Logo */}
+            <div className="absolute -inset-2 bg-gradient-to-r from-emerald-500/30 to-teal-500/30 rounded-3xl blur-md opacity-70 group-hover:opacity-100 transition duration-500 animate-aura-glow" />
+
+            {/* 3D Floating Logo Container */}
+            <div className="relative w-20 h-20 rounded-2xl bg-gradient-to-b from-white via-slate-50 to-slate-100 border border-slate-200/90 shadow-[0_15px_30px_rgba(0,0,0,0.12),inset_0_2px_4px_rgba(255,255,255,1),inset_0_-2px_4px_rgba(0,0,0,0.05)] flex items-center justify-center p-2.5 transition-all duration-300 group-hover:scale-105 group-hover:shadow-[0_20px_35px_rgba(16,185,129,0.2)] animate-float-logo">
+              <img
+                src="/assets/icons/logo.png"
+                alt="Abdullah Gym 1"
+                className="w-14 h-14 object-contain filter drop-shadow-[0_6px_10px_rgba(0,0,0,0.18)] transition-transform duration-300 group-hover:scale-110"
               />
-            </svg>
+            </div>
           </div>
-          <div className="flex items-center gap-2 mb-1">
-            <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-extrabold px-2.5 py-0.5 rounded-full uppercase tracking-wider">
-              Secure Access
-            </span>
-          </div>
-          <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight">
+          
+          {/* Abdullah Gym 1 Heading */}
+          <h1 className="text-2xl sm:text-[26px] font-black text-slate-900 tracking-tight leading-tight">
             Abdullah Gym 1
           </h1>
-          <p className="text-xs text-slate-500 mt-1 font-semibold">
-            Strict Admin & Executive Management Portal
-          </p>
+
+          {/* Admin Panel Sub-Label Below Heading */}
+          <div className="mt-1.5">
+            <span className="text-[11px] font-extrabold uppercase tracking-[0.22em] text-emerald-700 bg-emerald-50 border border-emerald-200/80 px-3.5 py-0.5 rounded-full shadow-2xs inline-block">
+              Admin Panel
+            </span>
+          </div>
         </div>
 
         {/* Lockout Warning Banner */}
         {lockoutTimer > 0 && (
-          <div className="mb-6 p-4 bg-rose-50 border border-rose-200/80 rounded-2xl text-xs text-rose-800 space-y-1">
+          <div className="mb-5 p-4 bg-rose-50 border border-rose-200/80 rounded-2xl text-xs text-rose-800 space-y-1 shadow-xs">
             <div className="flex items-center gap-2 font-bold text-rose-900">
               <span>🔒 Account Temporarily Locked</span>
             </div>
@@ -198,7 +264,7 @@ export default function AdminLoginPage() {
 
         {/* Error Alert */}
         {errorMsg && lockoutTimer <= 0 && (
-          <div className="mb-6 p-3.5 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 flex items-center gap-2 font-medium">
+          <div className="mb-5 p-3.5 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 flex items-center gap-2 font-medium shadow-xs">
             <svg className="w-4 h-4 shrink-0 text-rose-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
@@ -209,23 +275,23 @@ export default function AdminLoginPage() {
         {/* Login Form */}
         <form onSubmit={handleLogin} className="space-y-4">
           <div>
-            <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">
-              Admin Credentials Email
+            <label className="block text-xs font-bold text-slate-600 uppercase tracking-wide mb-1.5">
+              Username
             </label>
             <input
-              type="email"
+              type="text"
               required
               disabled={lockoutTimer > 0 || loading}
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full bg-slate-50 border border-slate-200 focus:border-emerald-500 focus:bg-white rounded-xl px-4 py-2.5 text-xs text-slate-900 placeholder-slate-400 focus:outline-none transition-all disabled:opacity-50"
-              placeholder="admin@abdullahgym.com"
+              className="w-full bg-slate-50/80 border border-slate-200 focus:border-emerald-500 focus:bg-white rounded-xl px-4 py-2.5 text-xs text-slate-900 placeholder-slate-400 focus:outline-none shadow-[inset_0_1.5px_3px_rgba(0,0,0,0.03)] focus:shadow-[0_0_0_3px_rgba(16,185,129,0.15)] transition-all disabled:opacity-50 font-medium"
+              placeholder="e.g. admin@abdullahgym.com"
             />
           </div>
 
           <div>
-            <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">
-              Admin Account Password
+            <label className="block text-xs font-bold text-slate-600 uppercase tracking-wide mb-1.5">
+              Password
             </label>
             <input
               type="password"
@@ -233,22 +299,23 @@ export default function AdminLoginPage() {
               disabled={lockoutTimer > 0 || loading}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full bg-slate-50 border border-slate-200 focus:border-emerald-500 focus:bg-white rounded-xl px-4 py-2.5 text-xs text-slate-900 placeholder-slate-400 focus:outline-none transition-all disabled:opacity-50"
+              className="w-full bg-slate-50/80 border border-slate-200 focus:border-emerald-500 focus:bg-white rounded-xl px-4 py-2.5 text-xs text-slate-900 placeholder-slate-400 focus:outline-none shadow-[inset_0_1.5px_3px_rgba(0,0,0,0.03)] focus:shadow-[0_0_0_3px_rgba(16,185,129,0.15)] transition-all disabled:opacity-50 font-medium"
               placeholder="••••••••"
             />
           </div>
 
+          {/* 3D Elevated Button */}
           <button
             type="submit"
             disabled={lockoutTimer > 0 || loading}
-            className="w-full bg-slate-900 hover:bg-emerald-600 text-white font-bold py-3 px-4 rounded-xl transition-all duration-200 shadow-md text-xs tracking-wide disabled:opacity-50 mt-2"
+            className="w-full bg-gradient-to-b from-slate-900 to-slate-950 hover:from-emerald-600 hover:to-emerald-700 text-white font-extrabold py-3 px-4 rounded-xl shadow-[0_10px_20px_-5px_rgba(15,23,42,0.3),0_4px_6px_-2px_rgba(15,23,42,0.1),inset_0_1px_1px_rgba(255,255,255,0.2)] hover:shadow-[0_12px_24px_-5px_rgba(16,185,129,0.35),inset_0_1px_1px_rgba(255,255,255,0.3)] active:translate-y-0.5 active:shadow-[0_2px_4px_rgba(0,0,0,0.2)] text-xs tracking-wider transition-all duration-200 cursor-pointer disabled:opacity-50 mt-3"
           >
-            {loading ? "VERIFYING CREDENTIALS..." : "SIGN IN TO ADMIN DASHBOARD"}
+            {loading ? "Signing In..." : "Sign In"}
           </button>
         </form>
 
         {/* Footer Navigation */}
-        <div className="mt-6 pt-5 border-t border-slate-100 flex flex-col items-center gap-2">
+        <div className="mt-6 pt-5 border-t border-slate-100 flex flex-col items-center gap-2 text-center">
           <Link
             href="/"
             className="text-xs text-slate-500 hover:text-slate-900 font-medium transition"

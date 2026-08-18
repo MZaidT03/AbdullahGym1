@@ -123,17 +123,24 @@ export const AuthProvider = ({ children }) => {
 
       // Check DB status (case-insensitive)
       const rawDbStatus = (data?.status || 'Active').trim().toLowerCase();
-      const isDbInactive =
-        rawDbStatus === 'inactive' ||
-        rawDbStatus === 'deactivated' ||
-        rawDbStatus === 'expired' ||
-        rawDbStatus === 'unpaid' ||
+      const isDbSuspended =
+        rawDbStatus === 'suspended' ||
         rawDbStatus === 'disabled' ||
         rawDbStatus === 'blocked';
+      const isDbExpired =
+        rawDbStatus === 'expired' ||
+        rawDbStatus === 'inactive' ||
+        rawDbStatus === 'deactivated' ||
+        rawDbStatus === 'unpaid';
+      const isDbInactive = isDbSuspended || isDbExpired;
 
       let calculatedDays = 0;
       let overdueDays = 0;
-      let effectiveStatus = isDbInactive ? (data?.status || 'Expired') : 'Active';
+      let effectiveStatus = isDbSuspended
+        ? 'Suspended'
+        : isDbExpired
+        ? 'Expired'
+        : 'Active';
       let lastPaymentRecord = null;
       let calculatedExpiryDate = null;
       let calculatedRenewalOpenDate = null;
@@ -151,8 +158,7 @@ export const AuthProvider = ({ children }) => {
           if (userPayments && userPayments.length > 0) {
             lastPaymentRecord = userPayments[userPayments.length - 1];
 
-            // Stack consecutive 30-day payment cycles:
-            // If user renews early (e.g. 5 days before expiry), the new 30 days start after previous month completes!
+            // Stack consecutive 30-day payment cycles
             let runningExpiry = null;
 
             userPayments.forEach((pay) => {
@@ -160,13 +166,10 @@ export const AuthProvider = ({ children }) => {
               const payDate = new Date(pay.date);
 
               if (!runningExpiry) {
-                // First cycle
                 runningExpiry = new Date(payDate.getTime() + 30 * 86400000);
               } else if (payDate <= runningExpiry) {
-                // Early renewal before expiry: add 30 days onto previous expiry date
                 runningExpiry = new Date(runningExpiry.getTime() + 30 * 86400000);
               } else {
-                // Late renewal after previous cycle already expired
                 runningExpiry = new Date(payDate.getTime() + 30 * 86400000);
               }
             });
@@ -181,58 +184,50 @@ export const AuthProvider = ({ children }) => {
               const diffMs = runningExpiry.getTime() - now.getTime();
               const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
 
-              if (diffDays >= 0) {
+              if (diffDays > 0) {
                 calculatedDays = diffDays;
                 overdueDays = 0;
                 effectiveStatus = 'Active';
               } else {
                 calculatedDays = 0;
                 overdueDays = Math.abs(diffDays);
-                if (overdueDays > 7) {
-                  effectiveStatus = 'Expired';
-                } else {
-                  effectiveStatus = 'Active'; // In 7-day grace period
-                }
+                effectiveStatus = 'Expired';
               }
             }
           } else {
             // Member has NO paid payment record in database
-            const profileDate = data?.created_at ? new Date(data.created_at) : null;
-            if (profileDate) {
-              const diffMs = now.getTime() - profileDate.getTime();
-              const daysSinceCreation = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-              if (daysSinceCreation <= 7) {
-                calculatedDays = 0;
-                overdueDays = daysSinceCreation;
-                effectiveStatus = 'Active';
-              } else {
-                calculatedDays = 0;
-                overdueDays = Math.max(8, daysSinceCreation - 30);
-                effectiveStatus = 'Expired';
-              }
-            } else {
-              calculatedDays = 0;
-              overdueDays = 8;
-              effectiveStatus = 'Expired';
-            }
+            calculatedDays = 0;
+            overdueDays = 1;
+            effectiveStatus = 'Expired';
           }
         } catch (payErr) {
           console.warn('Notice calculating remaining days:', payErr);
           calculatedDays = 0;
-          overdueDays = 8;
+          overdueDays = 1;
           effectiveStatus = 'Expired';
         }
       } else if (isDbInactive) {
         calculatedDays = 0;
-        effectiveStatus = data?.status || 'Expired';
+        effectiveStatus = isDbSuspended ? 'Suspended' : 'Expired';
       }
 
-      const isFinalInactive = effectiveStatus === 'Expired' || effectiveStatus === 'Inactive' || isDbInactive || overdueDays > 7;
+      // Check explicit days_remaining on profile if present
+      if (data?.days_remaining !== undefined && data?.days_remaining !== null && Number(data.days_remaining) <= 0) {
+        calculatedDays = 0;
+        effectiveStatus = isDbSuspended ? 'Suspended' : 'Expired';
+      }
+
+      const isFinalInactive =
+        effectiveStatus === 'Expired' ||
+        effectiveStatus === 'Suspended' ||
+        effectiveStatus === 'Inactive' ||
+        isDbInactive ||
+        calculatedDays <= 0;
 
       if (isFinalInactive) {
-        effectiveStatus = data?.status && data.status !== 'Active' ? data.status : 'Expired';
+        effectiveStatus = isDbSuspended ? 'Suspended' : 'Expired';
         calculatedDays = 0;
-        if (isSupabaseConfigured() && userId && data?.status === 'Active') {
+        if (isSupabaseConfigured() && userId && data?.status === 'Active' && !isDbSuspended) {
           try {
             await supabase.from('profiles').update({ status: 'Expired' }).eq('id', userId);
           } catch (stErr) {
@@ -336,7 +331,7 @@ export const AuthProvider = ({ children }) => {
         if (initialSession) {
           const profile = await fetchProfile(initialSession.user.id, initialSession.user.email);
           const pStatus = (profile?.status || '').toLowerCase();
-          if (profile && pStatus !== 'inactive' && pStatus !== 'deactivated' && pStatus !== 'expired' && pStatus !== 'unpaid') {
+          if (profile && pStatus !== 'suspended' && pStatus !== 'inactive' && pStatus !== 'deactivated' && pStatus !== 'expired' && pStatus !== 'unpaid') {
             setSession(initialSession);
             setIsAuthenticated(true);
           } else {
@@ -356,7 +351,7 @@ export const AuthProvider = ({ children }) => {
           if (newSession) {
             const profile = await fetchProfile(newSession.user.id, newSession.user.email);
             const pStatus = (profile?.status || '').toLowerCase();
-            if (profile && pStatus !== 'inactive' && pStatus !== 'deactivated' && pStatus !== 'expired' && pStatus !== 'unpaid') {
+            if (profile && pStatus !== 'suspended' && pStatus !== 'inactive' && pStatus !== 'deactivated' && pStatus !== 'expired' && pStatus !== 'unpaid') {
               setSession(newSession);
               setIsAuthenticated(true);
             } else {
@@ -377,7 +372,7 @@ export const AuthProvider = ({ children }) => {
         if (storedUser) {
           const parsed = JSON.parse(storedUser);
           const pStatus = (parsed?.status || '').toLowerCase();
-          if (pStatus !== 'inactive' && pStatus !== 'deactivated' && pStatus !== 'expired' && pStatus !== 'unpaid') {
+          if (pStatus !== 'suspended' && pStatus !== 'inactive' && pStatus !== 'deactivated' && pStatus !== 'expired' && pStatus !== 'unpaid') {
             setUser(parsed);
             setIsAuthenticated(true);
           } else {
@@ -416,9 +411,47 @@ export const AuthProvider = ({ children }) => {
         }
 
         if (data?.session) {
+          // Fetch raw DB profile to check status directly
+          const { data: dbProf } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', data.user.id)
+            .single();
+
+          const rawStatus = (dbProf?.status || '').trim().toLowerCase();
+          const isSuspended = rawStatus === 'suspended' || rawStatus === 'blocked' || rawStatus === 'disabled';
+          const isDbExpired = rawStatus === 'expired' || rawStatus === 'inactive' || rawStatus === 'deactivated' || rawStatus === 'unpaid';
+
+          if (isSuspended) {
+            await supabase.auth.signOut();
+            try { await AsyncStorage.removeItem(LOCAL_STORAGE_KEY); } catch (e) {}
+            setSession(null);
+            setUser(null);
+            setIsAuthenticated(false);
+            return {
+              success: false,
+              isSuspended: true,
+              message: 'Account Suspended ⛔: Your gym account has been suspended. Please contact the front desk.',
+            };
+          }
+
+          if (isDbExpired) {
+            await supabase.auth.signOut();
+            try { await AsyncStorage.removeItem(LOCAL_STORAGE_KEY); } catch (e) {}
+            setSession(null);
+            setUser(null);
+            setIsAuthenticated(false);
+            return {
+              success: false,
+              isExpired: true,
+              message: 'Account Expired ❌: Your gym membership plan has expired. Please pay your renewal fee at the front desk to reactivate your access.',
+            };
+          }
+
           const profile = await fetchProfile(data.user.id, data.user.email);
           const pStatus = (profile?.status || '').toLowerCase();
-          const isProfileActive = profile && pStatus !== 'inactive' && pStatus !== 'deactivated' && pStatus !== 'expired' && pStatus !== 'unpaid';
+          const daysLeft = profile?.daysRemaining !== undefined ? Number(profile.daysRemaining) : null;
+          const isProfileActive = profile && pStatus === 'active' && (daysLeft === null || daysLeft > 0);
 
           if (isProfileActive) {
             setSession(data.session);
@@ -435,10 +468,19 @@ export const AuthProvider = ({ children }) => {
             setSession(null);
             setUser(null);
             setIsAuthenticated(false);
+
+            if (pStatus === 'suspended') {
+              return {
+                success: false,
+                isSuspended: true,
+                message: 'Account Suspended ⛔: Your gym account has been suspended. Please contact the front desk.',
+              };
+            }
+
             return {
               success: false,
-              isDeactivated: true,
-              message: 'Account Expired / Deactivated ❌: Your account status is Expired. Please contact admin to reactivate.',
+              isExpired: true,
+              message: 'Account Expired ❌: Your gym membership plan has expired. Please pay your renewal fee at the front desk to reactivate your access.',
             };
           }
         }

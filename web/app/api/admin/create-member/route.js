@@ -8,8 +8,8 @@ const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 export async function POST(request) {
   try {
     const body = await request.json();
-    const { email, password, full_name, gender, plan, fee_paid, payment_method } = body;
-    const memberGender = gender && ["Male", "Female", "Other"].includes(gender) ? gender : "Male";
+    const { email, password, full_name, gender, plan, fee_paid, payment_method, avatar_url } = body;
+    const memberGender = gender && ["Male", "Female"].includes(gender) ? gender : "Male";
 
     if (!email || !password || !full_name) {
       return NextResponse.json(
@@ -32,7 +32,7 @@ export async function POST(request) {
         email: cleanEmail,
         password: password,
         email_confirm: true,
-        user_metadata: { full_name, gender: memberGender, role: "member" },
+        user_metadata: { full_name, gender: memberGender, role: "member", avatar_url: avatar_url || "" },
       });
 
       if (adminUserError) {
@@ -50,7 +50,7 @@ export async function POST(request) {
         email: cleanEmail,
         password: password,
         options: {
-          data: { full_name, gender: memberGender, role: "member" },
+          data: { full_name, gender: memberGender, role: "member", avatar_url: avatar_url || "" },
         },
       });
 
@@ -75,6 +75,19 @@ export async function POST(request) {
       userId = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : String(Date.now());
     }
 
+    // Clean plan name (strip (PKR .../mo) while keeping add-on tags)
+    let cleanPlanName = plan || "Pro Membership";
+    if (cleanPlanName.includes(" (PKR")) {
+      const parts = cleanPlanName.split(" (PKR");
+      const baseName = parts[0];
+      const afterPkr = parts[1] || "";
+      if (afterPkr.includes("[Add-ons:")) {
+        cleanPlanName = `${baseName} [Add-ons:${afterPkr.split("[Add-ons:")[1]}`;
+      } else {
+        cleanPlanName = baseName;
+      }
+    }
+
     // Save/Upsert Profile in public.profiles
     const supabasePublic = createClient(supabaseUrl, supabaseAnonKey);
     const profilePayload = {
@@ -82,8 +95,9 @@ export async function POST(request) {
       email: cleanEmail,
       full_name: full_name,
       gender: memberGender,
+      avatar_url: avatar_url || null,
       member_id: generatedMemberId,
-      plan: plan ? plan.split(" (")[0] : "Pro Membership",
+      plan: cleanPlanName,
       days_remaining: 30,
       status: "Active",
       created_at: new Date().toISOString(),
@@ -99,7 +113,8 @@ export async function POST(request) {
 
     // Insert fee in public.payments
     try {
-      const numericFee = parseFloat(fee_paid) || 5000;
+      const parsedFee = parseFloat(String(fee_paid).replace(/,/g, ""));
+      const numericFee = !isNaN(parsedFee) ? parsedFee : 1600;
       await supabasePublic.from("payments").insert([
         {
           user_id: userId,
