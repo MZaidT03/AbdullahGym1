@@ -1,40 +1,63 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import colors from '../constants/colors';
 import theme from '../constants/theme';
 
 export const PaymentCard = ({
-  title = 'Membership Fee',
+  title = 'Monthly Membership Fee',
   date = 'Dec 01, 2024',
-  amount = '$120',
-  status = 'PAID',
+  amount = 'PKR 5,000',
+  status = 'Paid',
   isCurrent = false,
   nextDate = 'Dec 31, 2024',
+  method = 'Cash Desk',
+  invoiceId = 'INV-2026-084',
 }) => {
+  const getBadgeConfig = (st) => {
+    const s = (st || '').toUpperCase();
+    if (s.includes('PENDING')) {
+      return { bg: '#FEF3C7', text: '#D97706', dot: '#F59E0B', label: 'PENDING APPROVAL' };
+    }
+    if (s.includes('PAID')) {
+      return { bg: '#F0FDF4', text: colors.primaryDark, dot: '#22C55E', label: 'PAID ✓' };
+    }
+    if (s.includes('REJECTED') || s.includes('FAILED')) {
+      return { bg: '#FEF2F2', text: '#DC2626', dot: '#EF4444', label: 'REJECTED' };
+    }
+    return { bg: '#F1F5F9', text: colors.textSecondary, dot: '#94A3B8', label: st || 'UNPAID' };
+  };
+
+  const badge = getBadgeConfig(status);
+
   if (isCurrent) {
     return (
       <View style={styles.currentCard}>
+        <View style={styles.glowOverlay} />
+
         <View style={styles.currentHeader}>
           <View>
-            <Text style={styles.currentSub}>Current Membership</Text>
+            <Text style={styles.billingTag}>ACTIVE SUBSCRIPTION BILLING</Text>
             <Text style={styles.currentTitle}>{title}</Text>
           </View>
-          <View style={styles.activeBadge}>
-            <Text style={styles.activeText}>Active</Text>
+
+          <View style={[styles.statusBadge, { backgroundColor: badge.bg }]}>
+            <View style={[styles.statusDot, { backgroundColor: badge.dot }]} />
+            <Text style={[styles.statusText, { color: badge.text }]}>{badge.label}</Text>
           </View>
         </View>
 
-        <View style={styles.divider} />
+        <View style={styles.cardDivider} />
 
-        <View style={styles.detailsRow}>
-          <View>
-            <Text style={styles.metaLabel}>Membership Fee</Text>
-            <Text style={styles.metaValue}>{amount}/mo</Text>
+        <View style={styles.detailsGrid}>
+          <View style={styles.detailCol}>
+            <Text style={styles.detailLabel}>FEE AMOUNT</Text>
+            <Text style={styles.detailAmount}>{amount}</Text>
           </View>
-          <View style={{ alignItems: 'flex-end' }}>
-            <Text style={styles.metaLabel}>Next Payment</Text>
-            <Text style={styles.metaValue}>{nextDate}</Text>
+
+          <View style={[styles.detailCol, { alignItems: 'flex-end' }]}>
+            <Text style={styles.detailLabel}>NEXT DUE DATE</Text>
+            <Text style={styles.detailDate}>{nextDate}</Text>
           </View>
         </View>
       </View>
@@ -43,17 +66,24 @@ export const PaymentCard = ({
 
   return (
     <View style={styles.historyCard}>
-      <View style={styles.historyIconCircle}>
-        <Ionicons name="receipt-outline" size={18} color={colors.primaryDark} />
+      <View style={styles.historyLeft}>
+        <View style={styles.historyIconBox}>
+          <Ionicons name="receipt" size={18} color={colors.primaryDark} />
+        </View>
+        <View>
+          <Text style={styles.historyTitle}>{title}</Text>
+          <Text style={styles.historyMeta}>
+            {date} • <Text style={styles.methodText}>{method}</Text>
+          </Text>
+          {invoiceId ? <Text style={styles.invoiceText}>{invoiceId}</Text> : null}
+        </View>
       </View>
-      <View style={styles.historyContent}>
-        <Text style={styles.historyTitle}>{title}</Text>
-        <Text style={styles.historyDate}>{date}</Text>
-      </View>
+
       <View style={styles.historyRight}>
         <Text style={styles.historyAmount}>{amount}</Text>
-        <View style={styles.paidBadge}>
-          <Text style={styles.paidText}>{status}</Text>
+        <View style={[styles.historyBadge, { backgroundColor: badge.bg }]}>
+          <View style={[styles.statusDot, { backgroundColor: badge.dot }]} />
+          <Text style={[styles.historyBadgeText, { color: badge.text }]}>{badge.label}</Text>
         </View>
       </View>
     </View>
@@ -62,116 +92,153 @@ export const PaymentCard = ({
 
 const styles = StyleSheet.create({
   currentCard: {
-    backgroundColor: colors.cardBackgroundAlt,
+    backgroundColor: '#0F172A',
     borderRadius: 20,
     padding: 18,
-    borderWidth: 1,
-    borderColor: colors.border,
-    marginBottom: 20,
-    ...theme.shadows.soft,
+    marginBottom: 16,
+    overflow: 'hidden',
+    position: 'relative',
+    ...theme.shadows.medium,
+  },
+  glowOverlay: {
+    position: 'absolute',
+    top: -50,
+    right: -50,
+    width: 140,
+    height: 140,
+    borderRadius: 70,
+    backgroundColor: 'rgba(22, 196, 91, 0.18)',
   },
   currentHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
   },
-  currentSub: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.textSecondary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+  billingTag: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#94A3B8',
+    letterSpacing: 0.8,
   },
   currentTitle: {
-    fontSize: 20,
+    fontSize: 19,
     fontWeight: '800',
-    color: colors.primaryDark,
-    marginTop: 2,
+    color: colors.white,
+    marginTop: 4,
   },
-  activeBadge: {
-    backgroundColor: colors.primaryLight,
-    paddingHorizontal: 12,
+  statusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 10,
     paddingVertical: 4,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: colors.primary,
+    borderRadius: 10,
   },
-  activeText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.primaryDark,
+  statusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
   },
-  divider: {
+  statusText: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.3,
+  },
+  cardDivider: {
     height: 1,
-    backgroundColor: colors.border,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
     marginVertical: 14,
   },
-  detailsRow: {
+  detailsGrid: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'center',
   },
-  metaLabel: {
-    fontSize: 12,
-    color: colors.textSecondary,
-    marginBottom: 2,
+  detailCol: {
+    gap: 2,
   },
-  metaValue: {
-    fontSize: 16,
+  detailLabel: {
+    fontSize: 10,
     fontWeight: '700',
-    color: colors.textPrimary,
+    color: '#94A3B8',
+    letterSpacing: 0.6,
+  },
+  detailAmount: {
+    fontSize: 18,
+    fontWeight: '900',
+    color: colors.primary,
+  },
+  detailDate: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.white,
   },
   historyCard: {
-    backgroundColor: colors.white,
+    backgroundColor: colors.cardBackground,
     borderRadius: 16,
     padding: 14,
     borderWidth: 1,
     borderColor: colors.border,
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 10,
+    justifyContent: 'space-between',
+    marginBottom: 8,
     ...theme.shadows.soft,
   },
-  historyIconCircle: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: colors.primaryLight,
-    justifyContent: 'center',
+  historyLeft: {
+    flexDirection: 'row',
     alignItems: 'center',
-    marginRight: 12,
-  },
-  historyContent: {
+    gap: 12,
     flex: 1,
   },
+  historyIconBox: {
+    width: 38,
+    height: 38,
+    borderRadius: 11,
+    backgroundColor: '#F0FDF4',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   historyTitle: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '700',
     color: colors.textPrimary,
   },
-  historyDate: {
-    fontSize: 12,
+  historyMeta: {
+    fontSize: 11,
     color: colors.textSecondary,
     marginTop: 2,
   },
+  methodText: {
+    fontWeight: '700',
+    color: colors.primaryDark,
+  },
+  invoiceText: {
+    fontSize: 10,
+    color: colors.textMuted,
+    marginTop: 2,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
   historyRight: {
     alignItems: 'flex-end',
+    gap: 4,
   },
   historyAmount: {
     fontSize: 15,
-    fontWeight: '700',
+    fontWeight: '800',
     color: colors.textPrimary,
-    marginBottom: 2,
   },
-  paidBadge: {
-    backgroundColor: colors.primaryLight,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
+  historyBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
     borderRadius: 6,
   },
-  paidText: {
-    fontSize: 10,
+  historyBadgeText: {
+    fontSize: 9,
     fontWeight: '800',
-    color: colors.primaryDark,
   },
 });
 

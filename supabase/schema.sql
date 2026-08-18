@@ -70,7 +70,7 @@ CREATE TABLE IF NOT EXISTS public.payments (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   user_id UUID NOT NULL,
   amount NUMERIC(10, 2) NOT NULL,
-  total_fee NUMERIC(10, 2) DEFAULT 5000.00,
+  total_fee NUMERIC(10, 2),
   status TEXT DEFAULT 'Paid' CHECK (status IN ('Paid', 'Partial', 'Unpaid', 'Pending Approval', 'Pending', 'Failed')),
   invoice_id TEXT UNIQUE,
   payment_method TEXT DEFAULT 'Credit Card',
@@ -82,6 +82,20 @@ CREATE TABLE IF NOT EXISTS public.payments (
 -- Enable RLS for Payments
 ALTER TABLE public.payments ENABLE ROW LEVEL SECURITY;
 
+-- Migration for existing payments table:
+ALTER TABLE IF EXISTS public.payments ADD COLUMN IF NOT EXISTS proof_url TEXT;
+ALTER TABLE IF EXISTS public.payments ADD COLUMN IF NOT EXISTS total_fee NUMERIC(10, 2);
+ALTER TABLE IF EXISTS public.payments ALTER COLUMN total_fee DROP DEFAULT;
+
+-- Cleanup script: Fix existing rows where total_fee defaulted to 5000 instead of actual amount
+UPDATE public.payments 
+SET total_fee = amount 
+WHERE (total_fee = 5000.00 OR total_fee IS NULL) AND (amount != 5000.00 OR invoice_id LIKE 'INV-WALK%');
+
+-- Update status CHECK constraint to allow 'Pending Approval' and 'Rejected'
+ALTER TABLE public.payments DROP CONSTRAINT IF EXISTS payments_status_check;
+ALTER TABLE public.payments ADD CONSTRAINT payments_status_check CHECK (status IN ('Paid', 'Partial', 'Unpaid', 'Pending Approval', 'Pending', 'Rejected', 'Failed'));
+
 DROP POLICY IF EXISTS "Users can view own payments" ON public.payments;
 DROP POLICY IF EXISTS "Allow all for payments" ON public.payments;
 
@@ -89,6 +103,17 @@ CREATE POLICY "Allow all for payments"
   ON public.payments FOR ALL 
   USING (true)
   WITH CHECK (true);
+
+-- Create Supabase Storage Bucket & RLS for Payment Proof Screenshots
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('payment-proofs', 'payment-proofs', true)
+ON CONFLICT (id) DO NOTHING;
+
+DROP POLICY IF EXISTS "Public Storage Upload & Read for Payment Proofs" ON storage.objects;
+CREATE POLICY "Public Storage Upload & Read for Payment Proofs"
+  ON storage.objects FOR ALL
+  USING (bucket_id = 'payment-proofs')
+  WITH CHECK (bucket_id = 'payment-proofs');
 
 -- 4. Automatic Profile Trigger on Auth Signup
 CREATE OR REPLACE FUNCTION public.handle_new_user() 

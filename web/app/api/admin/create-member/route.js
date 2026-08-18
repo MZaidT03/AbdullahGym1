@@ -8,7 +8,7 @@ const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 export async function POST(request) {
   try {
     const body = await request.json();
-    const { email, password, full_name, gender, plan, fee_paid } = body;
+    const { email, password, full_name, gender, plan, fee_paid, payment_method } = body;
     const memberGender = gender && ["Male", "Female", "Other"].includes(gender) ? gender : "Male";
 
     if (!email || !password || !full_name) {
@@ -105,7 +105,7 @@ export async function POST(request) {
           user_id: userId,
           amount: numericFee,
           status: "Paid",
-          payment_method: "Cash / Desk",
+          payment_method: payment_method || "Cash / Desk",
           invoice_id: `INV-2026-${Math.floor(1000 + Math.random() * 9000)}`,
           date: new Date().toISOString(),
         },

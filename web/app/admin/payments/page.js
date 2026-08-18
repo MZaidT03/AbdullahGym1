@@ -41,6 +41,7 @@ function StatusBadge({ status }) {
     Paid: "bg-emerald-50 text-emerald-700 border-emerald-200/80",
     Partial: "bg-amber-50 text-amber-800 border-amber-200/80",
     "Pending Approval": "bg-indigo-50 text-indigo-700 border-indigo-200/80 animate-pulse",
+    Rejected: "bg-rose-50 text-rose-700 border-rose-200/80 font-bold",
     Unpaid: "bg-rose-50 text-rose-700 border-rose-200/80",
   };
 
@@ -48,6 +49,7 @@ function StatusBadge({ status }) {
     Paid: "✓ Fully Paid",
     Partial: "⚡ Partial",
     "Pending Approval": "⏳ Pending Approval",
+    Rejected: "✕ Rejected",
     Unpaid: "🔴 Unpaid",
   };
 
@@ -164,14 +166,23 @@ export default function PaymentsAdminPage() {
             }
 
             let remainingDue = isWalkIn ? 0 : Math.max(0, tFee - amt);
-            let calculatedStatus = item.status || "Paid";
+            let calculatedStatus = "Unpaid";
 
-            if (isWalkIn) {
+            if (item.status === "Rejected") {
+              calculatedStatus = "Rejected";
+              remainingDue = tFee;
+            } else if (item.status === "Pending Approval" || item.proof_url) {
+              calculatedStatus = "Pending Approval";
+              remainingDue = tFee;
+            } else if (item.status === "Paid") {
               calculatedStatus = "Paid";
               remainingDue = 0;
-            } else if (item.status === "Pending Approval" || item.proof_url) {
-              calculatedStatus = item.status || "Pending Approval";
-            } else if (remainingDue === 0 || amt >= tFee || prof?.status === "Active") {
+            } else if (item.status === "Partial") {
+              calculatedStatus = "Partial";
+            } else if (isWalkIn) {
+              calculatedStatus = "Paid";
+              remainingDue = 0;
+            } else if (amt >= tFee) {
               calculatedStatus = "Paid";
               remainingDue = 0;
             } else if (amt > 0) {
@@ -257,30 +268,145 @@ export default function PaymentsAdminPage() {
     setLoading(false);
   };
 
-  const handleApprovePayment = async (targetMember) => {
-    setStatusMsg(`✓ Approved online payment transfer screenshot for ${targetMember.full_name || "member"}!`);
+  const handleApprovePayment = async (targetMember, explicitProofUrl = null, explicitPaymentId = null) => {
+    setStatusMsg(`🎉 Approved payment for ${targetMember.full_name || "member"}! Push notification dispatched & 30 days added to membership pass.`);
+
+    const targetUserId = targetMember.user_id || targetMember.id;
+    let targetPaymentId = explicitPaymentId || targetMember.payment_id;
+
+    if (!targetPaymentId) {
+      const pendingPay = payments.find(
+        (p) => p.user_id === targetUserId && (p.status === "Pending Approval" || p.proof_url)
+      );
+      targetPaymentId = pendingPay?.id;
+    }
 
     setPayments((prev) =>
       prev.map((p) =>
-        p.user_id === targetMember.id || p.member_name === targetMember.full_name
-          ? { ...p, status: "Paid", remaining: "PKR 0", raw_remaining: 0 }
+        (targetPaymentId && p.id === targetPaymentId) || (!targetPaymentId && p.user_id === targetUserId && p.status === "Pending Approval")
+          ? { ...p, status: "Paid", proof_url: null, remaining: "PKR 0", raw_remaining: 0 }
           : p
       )
     );
 
     setMembers((prev) =>
       prev.map((m) =>
-        m.id === targetMember.id ? { ...m, payment_status: "Paid", status: "Active" } : m
+        m.id === targetUserId ? { ...m, payment_status: "Paid", status: "Active" } : m
       )
     );
 
     if (isSupabaseConfigured()) {
       try {
-        await supabase.from("payments").update({ status: "Paid" }).eq("user_id", targetMember.id);
-        await supabase.from("profiles").update({ status: "Active" }).eq("id", targetMember.id);
+        if (explicitProofUrl && explicitProofUrl.includes("payment-proofs")) {
+          try {
+            const urlParts = explicitProofUrl.split("/payment-proofs/");
+            if (urlParts.length > 1) {
+              const filePath = urlParts[1].split("?")[0];
+              await supabase.storage.from("payment-proofs").remove([filePath]);
+            }
+          } catch (storageErr) {
+            console.warn("Storage cleanup notice:", storageErr);
+          }
+        }
+
+        // Update ONLY this single targeted payment record
+        if (targetPaymentId) {
+          await supabase
+            .from("payments")
+            .update({ status: "Paid", proof_url: null })
+            .eq("id", targetPaymentId);
+        } else {
+          // Fallback: update only pending payments for this user
+          await supabase
+            .from("payments")
+            .update({ status: "Paid", proof_url: null })
+            .eq("user_id", targetUserId)
+            .eq("status", "Pending Approval");
+        }
+
+        if (targetUserId) {
+          const { data: userProf } = await supabase
+            .from("profiles")
+            .select("upcoming_plan, next_plan")
+            .eq("id", targetUserId)
+            .maybeSingle();
+
+          const profileUpdates = { status: "Active" };
+          if (userProf?.upcoming_plan || userProf?.next_plan) {
+            profileUpdates.plan = userProf.upcoming_plan || userProf.next_plan;
+            profileUpdates.upcoming_plan = null;
+            profileUpdates.next_plan = null;
+          }
+
+          await supabase.from("profiles").update(profileUpdates).eq("id", targetUserId);
+        }
         await fetchPaymentsAndMembers();
       } catch (err) {
         console.error("Supabase approve error:", err);
+      }
+    }
+
+    setActiveProof(null);
+    setTimeout(() => setStatusMsg(""), 5000);
+  };
+
+  const handleRejectPayment = async (targetMember, explicitProofUrl = null, explicitPaymentId = null) => {
+    if (!confirm(`Are you sure you want to reject the payment proof for ${targetMember.full_name || "this member"}?`)) {
+      return;
+    }
+
+    setStatusMsg(`Payment proof rejected for ${targetMember.full_name || "member"}. Screenshot deleted from storage.`);
+
+    const targetUserId = targetMember.user_id || targetMember.id;
+    let targetPaymentId = explicitPaymentId || targetMember.payment_id;
+
+    if (!targetPaymentId) {
+      const pendingPay = payments.find(
+        (p) => p.user_id === targetUserId && (p.status === "Pending Approval" || p.proof_url)
+      );
+      targetPaymentId = pendingPay?.id;
+    }
+
+    setPayments((prev) =>
+      prev.map((p) =>
+        (targetPaymentId && p.id === targetPaymentId) || (!targetPaymentId && p.user_id === targetUserId && p.status === "Pending Approval")
+          ? { ...p, status: "Rejected", proof_url: null }
+          : p
+      )
+    );
+
+    if (isSupabaseConfigured()) {
+      try {
+        if (explicitProofUrl && explicitProofUrl.includes("payment-proofs")) {
+          try {
+            const urlParts = explicitProofUrl.split("/payment-proofs/");
+            if (urlParts.length > 1) {
+              const filePath = urlParts[1].split("?")[0];
+              await supabase.storage.from("payment-proofs").remove([filePath]);
+            }
+          } catch (storageErr) {
+            console.warn("Storage cleanup notice on reject:", storageErr);
+          }
+        }
+
+        // Update ONLY this single targeted payment record
+        if (targetPaymentId) {
+          await supabase
+            .from("payments")
+            .update({ status: "Rejected", proof_url: null })
+            .eq("id", targetPaymentId);
+        } else {
+          // Fallback: update only pending approval payments for this user
+          await supabase
+            .from("payments")
+            .update({ status: "Rejected", proof_url: null })
+            .eq("user_id", targetUserId)
+            .eq("status", "Pending Approval");
+        }
+
+        await fetchPaymentsAndMembers();
+      } catch (err) {
+        console.error("Supabase reject error:", err);
       }
     }
 
@@ -355,6 +481,7 @@ export default function PaymentsAdminPage() {
           {
             user_id: targetUserId,
             amount: numericAmount,
+            total_fee: actualTotalFee,
             status: finalStatus,
             payment_method: method,
             invoice_id: isWalkInPayment ? `INV-WALK-${Math.floor(1000 + Math.random() * 9000)}` : invId,
@@ -409,36 +536,61 @@ export default function PaymentsAdminPage() {
     setIsModalOpen(true);
   };
 
+  const resolveBasePlanFee = (planStr) => {
+    if (!planStr) return 5000;
+    const cleanStr = String(planStr).trim().toLowerCase();
+
+    if (availablePlans && availablePlans.length > 0) {
+      const exactMatch = availablePlans.find(
+        (p) => p.name && cleanStr === p.name.toLowerCase()
+      );
+      if (exactMatch) {
+        return Number(exactMatch.monthly_price || exactMatch.monthlyPrice || exactMatch.daily_price || exactMatch.dailyPrice || 5000);
+      }
+
+      const subMatch = availablePlans.find(
+        (p) => p.name && (cleanStr.includes(p.name.toLowerCase()) || p.name.toLowerCase().includes(cleanStr))
+      );
+      if (subMatch) {
+        return Number(subMatch.monthly_price || subMatch.monthlyPrice || subMatch.daily_price || subMatch.dailyPrice || 5000);
+      }
+    }
+
+    const pkrMatch = cleanStr.match(/(?:pkr|rs\.?)\s*([\d,]+)/i);
+    if (pkrMatch && pkrMatch[1]) {
+      const parsed = parseInt(pkrMatch[1].replace(/,/g, ""), 10);
+      if (!isNaN(parsed) && parsed > 0) return parsed;
+    }
+
+    if (cleanStr.includes("pro plus") || cleanStr.includes("pro+")) return 12000;
+    if (cleanStr.includes("vip") || cleanStr.includes("champion")) return 9000;
+    if (cleanStr.includes("standard")) return 3500;
+    if (cleanStr.includes("daily") || cleanStr.includes("visitor")) return 500;
+    return 5000;
+  };
+
   const getMemberPaymentInfo = (memberId) => {
     const member = members.find((m) => m.id === memberId);
     const mPlanName = member?.plan || "Pro Membership";
-    const matchedPlan = availablePlans.find(
-      (p) => p.name.toLowerCase() === mPlanName.toLowerCase() || mPlanName.toLowerCase().includes(p.name.toLowerCase())
-    );
+    
+    let fee = resolveBasePlanFee(mPlanName);
 
     const userPayments = payments.filter((p) => p.user_id === memberId);
-    const sumPaid = userPayments.reduce((acc, p) => acc + (p.raw_amount || 0), 0);
+    const paidPayments = userPayments.filter((p) => p.status === "Paid");
+    const sumPaid = paidPayments.reduce((acc, p) => acc + (p.raw_amount || 0), 0);
 
-    let fee = 5000;
-    if (matchedPlan) {
-      fee = parseFloat(matchedPlan.monthly_price || matchedPlan.monthlyPrice) || 5000;
-    } else if (member?.total_fee) {
-      fee = member.total_fee;
-    } else if (userPayments.length > 0 && userPayments[0].raw_total_fee) {
-      fee = userPayments[0].raw_total_fee;
-    }
-    fee = Math.max(fee, sumPaid);
+    const pendingPay = userPayments.find((p) => p.status === "Pending Approval" || p.proof_url);
+    const hasRejectedOnly = userPayments.length > 0 && userPayments.every((p) => p.status === "Rejected");
+    const remaining = Math.max(0, fee - (paidPayments.length > 0 ? fee : sumPaid));
 
-    const remaining = Math.max(0, fee - sumPaid);
-
-    const hasPendingApproval = userPayments.some((p) => p.status === "Pending Approval");
-    let st = "Paid";
-    if (hasPendingApproval) st = "Pending Approval";
-    else if (sumPaid >= fee) st = "Paid";
+    let st = "Unpaid";
+    if (pendingPay) st = "Pending Approval";
+    else if (paidPayments.length > 0) st = "Paid";
     else if (sumPaid > 0) st = "Partial";
-    else st = "Unpaid";
+    else if (hasRejectedOnly) st = "Rejected";
+    else if (member?.status === "Active" && userPayments.length === 0) st = "Paid";
 
-    const proofUrl = userPayments.find((p) => p.proof_url)?.proof_url || member?.proof_url || null;
+    const proofUrl = pendingPay?.proof_url || userPayments.find((p) => p.proof_url)?.proof_url || member?.proof_url || null;
 
     return {
       status: st,
@@ -446,8 +598,9 @@ export default function PaymentsAdminPage() {
       total_fee: fee,
       remaining: remaining,
       proof_url: proofUrl,
-      method: userPayments[0]?.method || "Desk Collection",
-      invoice_id: userPayments[0]?.invoice_id || "INV-MEM",
+      payment_id: pendingPay?.id || userPayments[0]?.id || null,
+      method: pendingPay?.method || userPayments[0]?.method || "Desk Collection",
+      invoice_id: pendingPay?.invoice_id || userPayments[0]?.invoice_id || "INV-MEM",
     };
   };
 
@@ -657,8 +810,9 @@ export default function PaymentsAdminPage() {
           { key: "All", label: "Show All" },
           { key: "Paid", label: "✓ Fully Paid" },
           { key: "Partial", label: "⚡ Partial" },
-          { key: "Unpaid", label: "🔴 Unpaid" },
           { key: "Pending Approval", label: "📱 App Proofs" },
+          { key: "Rejected", label: "✕ Rejected" },
+          { key: "Unpaid", label: "🔴 Unpaid" },
         ].map((st) => (
           <button
             key={st.key}
@@ -833,7 +987,13 @@ export default function PaymentsAdminPage() {
                         <td className="py-3.5 px-3.5 text-right">
                           {isPendingApproval ? (
                             <button
-                              onClick={() => handleApprovePayment({ id: m.id, full_name: m.full_name })}
+                              onClick={() =>
+                                handleApprovePayment(
+                                  { id: m.id, full_name: m.full_name, payment_id: info.payment_id },
+                                  info.proof_url,
+                                  info.payment_id
+                                )
+                              }
                               className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-lg transition"
                             >
                               Approve
@@ -1129,17 +1289,24 @@ export default function PaymentsAdminPage() {
               />
             </div>
 
-            <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100">
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
               <button
                 type="button"
                 onClick={() => setActiveProof(null)}
-                className="text-xs text-slate-500 hover:text-slate-800 px-3 py-2 rounded-xl font-semibold"
+                className="text-xs text-slate-500 hover:text-slate-800 px-3 py-2 rounded-xl font-semibold mr-auto"
               >
                 Close
               </button>
               <button
                 type="button"
-                onClick={() => handleApprovePayment(activeProof.member)}
+                onClick={() => handleRejectPayment(activeProof.member, activeProof.info?.proof_url, activeProof.info?.payment_id)}
+                className="bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs px-3.5 py-2 rounded-xl border border-rose-200 transition-all"
+              >
+                Reject Proof
+              </button>
+              <button
+                type="button"
+                onClick={() => handleApprovePayment(activeProof.member, activeProof.info?.proof_url, activeProof.info?.payment_id)}
                 className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-4 py-2 rounded-xl transition-all shadow-xs"
               >
                 Approve Transfer
