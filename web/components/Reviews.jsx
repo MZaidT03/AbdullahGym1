@@ -63,7 +63,7 @@ export function Reviews() {
           {description}
         </p>
 
-        {/* 4 Member Review Cards (Ammad, Talha, Ahmed, Umer) */}
+        {/* 4 Member Review Cards (Ammad, Talha, Ahmed, Umar) */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 sm:gap-8 w-full max-w-6xl">
           {items.map((review) => (
             <div

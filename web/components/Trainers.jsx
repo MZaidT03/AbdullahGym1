@@ -54,8 +54,8 @@ export function Trainers() {
           {description}
         </p>
 
-        {/* 2 Featured Trainer Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 sm:gap-12 w-full max-w-5xl">
+        {/* Featured Leadership & Trainer Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 sm:gap-10 w-full max-w-7xl">
           {members.map((trainer) => (
             <div
               key={trainer.id}

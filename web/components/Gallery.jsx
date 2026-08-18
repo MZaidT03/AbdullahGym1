@@ -1,12 +1,29 @@
 "use client";
 
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
+import { createPortal } from "react-dom";
 import Image from "next/image";
 import { siteData } from "../config/siteData";
 
 export function Gallery() {
   const [selectedImage, setSelectedImage] = useState(null);
+  const [mounted, setMounted] = useState(false);
   const containerRef = useRef(null);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (selectedImage) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "unset";
+    }
+    return () => {
+      document.body.style.overflow = "unset";
+    };
+  }, [selectedImage]);
 
   const handleMouseMove = (e) => {
     if (!containerRef.current) return;
@@ -55,8 +72,8 @@ export function Gallery() {
           {description}
         </p>
 
-        {/* 4 Image Cards Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 w-full">
+        {/* 6 Image Cards Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 w-full">
           {items.map((item) => (
             <div
               key={item.id}
@@ -94,51 +111,53 @@ export function Gallery() {
         </div>
       </div>
 
-      {/* Lightbox Modal for Expanded View */}
-      {selectedImage && (
+      {/* Lightbox Modal rendered via Portal directly to body for perfect screen centering */}
+      {selectedImage && mounted && createPortal(
         <div
           onClick={() => setSelectedImage(null)}
-          className="fixed inset-0 z-[110] flex items-center justify-center p-4 sm:p-8 bg-black/85 backdrop-blur-md animate-fade-in cursor-pointer"
+          className="fixed inset-0 z-[9999] flex items-center justify-center p-4 sm:p-6 bg-black/90 backdrop-blur-md cursor-pointer animate-fade-in"
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="relative max-w-4xl w-full bg-[#0F1A11] border border-emerald-500/40 rounded-3xl overflow-hidden shadow-[0_0_80px_rgba(34,197,94,0.3)] text-white flex flex-col"
+            className="relative max-w-4xl w-full max-h-[90vh] bg-[#0F1A11] border border-emerald-500/40 rounded-3xl overflow-hidden shadow-[0_0_80px_rgba(34,197,94,0.35)] text-white flex flex-col cursor-default my-auto"
           >
             {/* Close Button */}
             <button
               onClick={() => setSelectedImage(null)}
-              className="absolute top-4 right-4 z-20 text-white bg-black/70 hover:bg-emerald-500 hover:text-black rounded-full w-9 h-9 flex items-center justify-center transition-all cursor-pointer font-bold shadow-lg"
+              aria-label="Close image modal"
+              className="absolute top-4 right-4 z-20 text-white bg-black/80 hover:bg-emerald-500 hover:text-black rounded-full w-10 h-10 flex items-center justify-center transition-all cursor-pointer font-bold shadow-lg border border-white/20"
             >
               ✕
             </button>
 
             {/* Modal Image Box */}
-            <div className="relative w-full aspect-[16/10] sm:aspect-[16/9] bg-black">
+            <div className="relative w-full h-[55vh] sm:h-[65vh] bg-black/90 flex items-center justify-center">
               <Image
                 src={selectedImage.image}
                 alt={selectedImage.title}
                 fill
-                sizes="100vw"
-                className="object-contain"
+                sizes="(max-width: 1280px) 100vw, 1200px"
+                className="object-contain p-2"
               />
             </div>
 
             {/* Modal Image Caption */}
-            <div className="p-6 bg-[#070D08] flex items-center justify-between border-t border-white/10">
+            <div className="p-4 sm:p-6 bg-[#070D08] flex items-center justify-between border-t border-white/10 shrink-0">
               <div>
                 <span className="text-xs font-extrabold uppercase tracking-wider text-emerald-400 block mb-1">
                   {selectedImage.category}
                 </span>
-                <h4 className="text-lg sm:text-xl font-bold text-white">
+                <h4 className="text-base sm:text-xl font-bold text-white">
                   {selectedImage.title}
                 </h4>
               </div>
-              <span className="px-4 py-2 rounded-xl bg-emerald-500/20 border border-emerald-400/30 text-emerald-300 text-xs font-bold uppercase">
+              <span className="px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl bg-emerald-500/20 border border-emerald-400/30 text-emerald-300 text-xs font-bold uppercase shrink-0">
                 ABDULLAH GYM 1
               </span>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </section>
   );

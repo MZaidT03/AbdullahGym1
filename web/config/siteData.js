@@ -1,6 +1,6 @@
 export const siteData = {
   name: "ABDULLAH GYM 1",
-  title: "ABDULLAH GYM 1 - Ladies & Gents Fitness Center",
+  title: "ABDULLAH GYM 1 - Gents & Ladies Fitness Center",
   logo: "/assets/icons/logo.png",
   navLinks: [
     { label: "About Us", href: "#about" },
@@ -14,17 +14,17 @@ export const siteData = {
   ],
   hero: {
     headline: "ABDULLAH GYM 1",
-    subheading: "LADIES AND GENTS FITNESS CENTER",
+    subheading: "GENTS AND LADIES FITNESS CENTER",
     slogan: "No Limits. Just Results.",
     primaryCta: "Download App",
   },
   about: {
     title: "Empowering Your Fitness Journey",
-    description: "Welcome to ABDULLAH GYM 1 — your premier fitness destination dedicated to real, limit-pushing transformations. We provide separate, fully equipped training centers for both ladies and gents, supported by certified personal trainers, cutting-edge workout machinery, and personalized fitness programs.",
+    description: "Welcome to ABDULLAH GYM 1 — your premier fitness destination dedicated to real, limit-pushing transformations. We provide separate, fully equipped training centers for both gents and ladies, supported by certified personal trainers, cutting-edge workout machinery, and personalized fitness programs.",
     highlights: [
       {
         title: "Dedicated Sections",
-        desc: "Fully separate, comfortable workout environments tailored for ladies and gents."
+        desc: "Fully separate, comfortable workout environments tailored for gents and ladies."
       },
       {
         title: "Mission & Vision",
@@ -39,7 +39,7 @@ export const siteData = {
   services: {
     badge: "What We Offer",
     title: "Our Premium Services",
-    description: "Elevate your strength, endurance, and overall health with specialized fitness solutions for ladies and gents.",
+    description: "Elevate your strength, endurance, and overall health with specialized fitness solutions for gents and ladies.",
     image: "/assets/images/services.png",
     items: [
       {
@@ -88,7 +88,9 @@ export const siteData = {
       title: "Gents Dedicated Shift",
       subtitle: "Heavy Resistance & High-Performance Muscle Building",
       image: "/assets/images/landing.png",
-      timings: "04:00 PM - 11:00 PM",
+      timings: "Morning: 05:00 AM - 09:00 AM | Evening: 04:00 PM - 11:00 PM",
+      morningTimings: "05:00 AM - 09:00 AM",
+      eveningTimings: "04:00 PM - 11:00 PM",
       features: [
         "Heavy Powerlifting & Free Weight Zones",
         "Certified Male Fitness Coaches",
@@ -127,6 +129,19 @@ export const siteData = {
           "Custom Workout & Diet Plans"
         ],
         image: "/assets/images/co_founder.png"
+      },
+      {
+        id: "rana-talha",
+        name: "RANA TALHA",
+        role: "Co-Founder & Fitness Coach",
+        subtitle: "",
+        experience: "5+ Years Experience",
+        specialties: [
+          "Personalized Fitness Coaching",
+          "Strength & Conditioning",
+          "Custom Workout & Diet Plans"
+        ],
+        image: "/assets/images/co_founder_2.png"
       }
     ]
   },
@@ -158,6 +173,18 @@ export const siteData = {
         title: "Personal Coaching Facility",
         category: "Coaching & Transformation",
         image: "/assets/images/gym4.png"
+      },
+      {
+        id: "pose-1",
+        title: "Championship Physique & Pose",
+        category: "Master Trainer Action",
+        image: "/assets/images/trainer_pose_1.png"
+      },
+      {
+        id: "pose-2",
+        title: "Elite Conditioning & Form",
+        category: "Master Trainer Action",
+        image: "/assets/images/trainer_pose_2.png"
       }
     ]
   },
@@ -188,7 +215,7 @@ export const siteData = {
         role: "Member • Fat Loss & Fitness",
         rating: 5,
         initial: "A",
-        comment: "Super clean gym, spacious powerlifting racks, and great community. The separate shift timings for ladies and gents gives complete peace of mind for families in our city."
+        comment: "Super clean gym, spacious powerlifting racks, and great community. The separate shift timings for gents and ladies gives complete peace of mind for families in our city."
       },
       {
         id: "umar",
@@ -221,7 +248,7 @@ export const siteData = {
       {
         id: "timings",
         question: "What are the overall gym shift timings?",
-        answer: "ABDULLAH GYM 1 operates in dedicated gender shifts to ensure maximum comfort and focus. The Ladies Shift runs from 10:00 AM to 01:00 PM, and the Gents Shift runs from 04:00 PM to 11:00 PM."
+        answer: "ABDULLAH GYM 1 operates in dedicated gender shifts to ensure maximum comfort and focus. The Ladies Shift runs from 10:00 AM to 01:00 PM. The Gents Shift operates in two daily slots: Morning (05:00 AM to 09:00 AM) and Evening (04:00 PM to 11:00 PM)."
       },
       {
         id: "ladies-timings",
@@ -236,7 +263,7 @@ export const siteData = {
       {
         id: "trainer-availability",
         question: "Are personal trainers available on floor?",
-        answer: "Yes! Certified master coaches including Founder Rana Irfan (Mr. Champion Gujranwala) and Co-Founder Rana Ibrar are available on floor to provide 1-on-1 coaching, form corrections, and customized workout regimens."
+        answer: "Yes! Certified master coaches including Founder Rana Irfan (Mr. Champion Gujranwala) and Co-Founders Rana Ibrar & Rana Talha are available on floor to provide 1-on-1 coaching, form corrections, and customized workout regimens."
       },
       {
         id: "beginners",
@@ -260,7 +287,7 @@ export const siteData = {
   socials: {
     facebook: "https://www.facebook.com/share/1BxrUQMroM/?mibextid=wwXIfr",
     tiktok: "https://www.tiktok.com/@abdullah.gym1snooker.cl0?_r=1&_t=ZS-98lDJith0bw",
-    instagram: "https://www.instagram.com/aabdullahspliment?igsh=bWFwcTNrc3lmazk5"
+    instagram: "https://www.instagram.com/aabdullahspliment"
   },
   footerLinks: [
     { label: "About Us", href: "#about" },

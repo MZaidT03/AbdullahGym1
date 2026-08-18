@@ -28,7 +28,7 @@ export function Footer() {
           </div>
 
           <p className="text-xs sm:text-sm text-gray-300 leading-relaxed mb-4">
-            LADIES AND GENTS FITNESS CENTER
+            GENTS AND LADIES FITNESS CENTER
           </p>
 
           <span className="text-xs font-black text-[#22C55E] italic tracking-wide">

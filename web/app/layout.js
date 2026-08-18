@@ -11,12 +11,12 @@ const inter = Inter({
 const SITE_URL = "https://abdullahgym1.online";
 const SITE_NAME = "Abdullah Gym 1";
 const SITE_DESCRIPTION =
-  "Abdullah Gym 1 — Best Ladies & Gents Fitness Center in Gujranwala. Separate dedicated shifts, certified personal trainers, weight training, cardio, bodybuilding & custom diet plans. Located on Sialkot Road near Jagna Bazar, Rajput Colony, Gujranwala. Join now!";
+  "Abdullah Gym 1 — Best Gents & Ladies Fitness Center in Gujranwala. Separate dedicated shifts, certified personal trainers, weight training, cardio, bodybuilding & custom diet plans. Located on Sialkot Road near Jagna Bazar, Rajput Colony, Gujranwala. Join now!";
 
 export const metadata = {
   metadataBase: new URL(SITE_URL),
   title: {
-    default: "Abdullah Gym 1 | Best Ladies & Gents Gym in Gujranwala",
+    default: "Abdullah Gym 1 | Best Gents & Ladies Gym in Gujranwala",
     template: "%s | Abdullah Gym 1 — Gym Gujranwala",
   },
   description: SITE_DESCRIPTION,
@@ -36,6 +36,12 @@ export const metadata = {
     "fitness club Gujranwala",
     "workout gym Gujranwala",
 
+    // Gents specific
+    "gents gym Gujranwala",
+    "men gym Gujranwala",
+    "boys gym Gujranwala",
+    "male fitness center Gujranwala",
+
     // Ladies specific
     "ladies gym Gujranwala",
     "ladies fitness center Gujranwala",
@@ -48,12 +54,6 @@ export const metadata = {
     "ladies gym near me Gujranwala",
     "ladies gym with privacy Gujranwala",
     "pardah ladies gym Gujranwala",
-
-    // Gents specific
-    "gents gym Gujranwala",
-    "men gym Gujranwala",
-    "boys gym Gujranwala",
-    "male fitness center Gujranwala",
 
     // Services
     "personal trainer Gujranwala",
@@ -92,8 +92,8 @@ export const metadata = {
     "Rana Ibrar trainer Gujranwala",
 
     // Long-tail intent
-    "best gym for ladies in Gujranwala",
-    "gym with separate timings for ladies gents Gujranwala",
+    "best gym for gents and ladies in Gujranwala",
+    "gym with separate timings for gents ladies Gujranwala",
     "gym with privacy for women Gujranwala",
     "affordable gym Gujranwala",
     "professional gym Gujranwala",
@@ -105,7 +105,7 @@ export const metadata = {
 
     // Pakistan-wide discovery
     "gym in Punjab Pakistan",
-    "ladies gym Punjab Pakistan",
+    "gents ladies gym Punjab Pakistan",
     "fitness center Punjab",
     "best gym Pakistan Gujranwala",
   ],
@@ -131,27 +131,31 @@ export const metadata = {
     locale: "en_PK",
     url: SITE_URL,
     siteName: SITE_NAME,
-    title: "Abdullah Gym 1 | Best Ladies & Gents Gym in Gujranwala",
+    title: "Abdullah Gym 1 | Best Gents & Ladies Gym in Gujranwala",
     description: SITE_DESCRIPTION,
     images: [
       {
         url: "/assets/icons/logo.png",
         width: 512,
         height: 512,
-        alt: "Abdullah Gym 1 — Best Gym in Gujranwala for Ladies & Gents",
+        alt: "Abdullah Gym 1 — Best Gym in Gujranwala for Gents & Ladies",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "Abdullah Gym 1 | Best Ladies & Gents Gym in Gujranwala",
+    title: "Abdullah Gym 1 | Best Gents & Ladies Gym in Gujranwala",
     description: SITE_DESCRIPTION,
     images: ["/assets/icons/logo.png"],
     creator: "@abdullahgym1",
   },
   icons: {
-    icon: "/favicon.ico",
-    shortcut: "/favicon.ico",
+    icon: [
+      { url: "/favicon.ico" },
+      { url: "/icon.png", sizes: "512x512", type: "image/png" },
+      { url: "/assets/icons/logo.png", sizes: "512x512", type: "image/png" },
+    ],
+    shortcut: "/icon.png",
     apple: "/assets/icons/logo.png",
   },
   manifest: "/manifest.json",
@@ -166,6 +170,12 @@ export const metadata = {
 export default function RootLayout({ children }) {
   return (
     <html lang="en-PK" suppressHydrationWarning>
+      <head>
+        <link rel="icon" href="/favicon.ico" sizes="any" />
+        <link rel="icon" type="image/png" sizes="512x512" href="/assets/icons/logo.png" />
+        <link rel="apple-touch-icon" href="/assets/icons/logo.png" />
+        <link rel="shortcut icon" href="/assets/icons/logo.png" />
+      </head>
       <body className={inter.variable} suppressHydrationWarning>
         <JsonLd />
         {children}
