@@ -418,6 +418,12 @@ export default function AttendanceAdminPage() {
       const [hours, minutes] = checkInTime.split(":").map(Number);
       const selectedIso = new Date(year, month - 1, day, hours, minutes, 0).toISOString();
 
+      const formattedDisplayDate = new Date(year, month - 1, day).toLocaleDateString([], {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      });
+
       if (isSupabaseConfigured()) {
         try {
           const { error } = await supabase.from("attendance").insert([
@@ -434,6 +440,21 @@ export default function AttendanceAdminPage() {
               message: error.message,
             });
           } else {
+            // Insert notification for member
+            try {
+              await supabase.from("notifications").insert([
+                {
+                  user_id: checkInTargetMember.id,
+                  title: "Attendance Marked! 💪",
+                  message: `Your check-in for ${formattedDisplayDate} at ${checkInTime} was recorded by admin. Keep crushing your workouts!`,
+                  type: "attendance_marked",
+                  action: "VIEW_ATTENDANCE",
+                  created_at: new Date().toISOString(),
+                },
+              ]);
+            } catch (notifErr) {
+              console.warn("Notice creating attendance notification:", notifErr);
+            }
             await fetchAllData();
           }
         } catch (err) {
@@ -452,12 +473,6 @@ export default function AttendanceAdminPage() {
         };
         setLogs([newLog, ...logs]);
       }
-
-      const formattedDisplayDate = new Date(year, month - 1, day).toLocaleDateString([], {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-      });
 
       setStatusMsg(`✓ Attendance marked for ${checkInTargetMember.full_name} on ${formattedDisplayDate} at ${checkInTime}!`);
       setTimeout(() => setStatusMsg(""), 5000);

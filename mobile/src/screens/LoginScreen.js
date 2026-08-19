@@ -5,12 +5,13 @@ import {
   StyleSheet,
   TextInput,
   TouchableOpacity,
-  SafeAreaView,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
   ActivityIndicator,
+  Image,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
 import colors from '../constants/colors';
@@ -57,7 +58,11 @@ export const LoginScreen = ({ navigation }) => {
           {/* Top Branding Header */}
           <View style={styles.brandHeader}>
             <View style={styles.logoBadge}>
-              <Ionicons name="barbell" size={28} color={colors.white} />
+              <Image
+                source={require('../../assets/logo.png')}
+                style={styles.loginLogoImage}
+                resizeMode="cover"
+              />
             </View>
             <Text style={styles.brandTitle}>Abdullah Gym 1</Text>
           </View>
@@ -225,17 +230,24 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   logoBadge: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: colors.primary,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#0A0F1D',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 10,
+    overflow: 'hidden',
+    borderWidth: 1.5,
+    borderColor: colors.primary,
     ...theme.shadows.soft,
   },
+  loginLogoImage: {
+    width: '100%',
+    height: '100%',
+  },
   brandTitle: {
-    fontSize: 28,
+    fontSize: 26,
     fontWeight: '800',
     color: colors.primaryDark,
     letterSpacing: -0.5,

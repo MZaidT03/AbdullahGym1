@@ -22,14 +22,16 @@ export const NotificationModal = ({
 }) => {
   const getIconForType = (type) => {
     switch (type) {
-      case 'grace_period':
-        return { name: 'warning', color: '#D97706', bg: '#FEF3C7' };
       case 'expired':
         return { name: 'close-circle', color: '#DC2626', bg: '#FEE2E2' };
+      case 'payment_approved':
       case 'payment_confirmed':
         return { name: 'checkmark-circle', color: colors.primaryDark, bg: '#F0FDF4' };
+      case 'attendance_marked':
       case 'attendance':
         return { name: 'barbell', color: '#2563EB', bg: '#EFF6FF' };
+      case 'profile_updated':
+        return { name: 'person-circle', color: '#7C3AED', bg: '#F5F3FF' };
       default: // 'fee_deadline'
         return { name: 'time', color: '#2563EB', bg: '#EFF6FF' };
     }
@@ -97,7 +99,6 @@ export const NotificationModal = ({
                 const iconInfo = getIconForType(item.type);
                 const isFeeRelated =
                   item.type === 'fee_deadline' ||
-                  item.type === 'grace_period' ||
                   item.type === 'expired';
 
                 return (

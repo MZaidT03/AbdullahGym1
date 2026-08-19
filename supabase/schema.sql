@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS public.profiles (
 
 -- Migration for existing database tables:
 ALTER TABLE IF EXISTS public.profiles ADD COLUMN IF NOT EXISTS gender TEXT DEFAULT 'Male';
+ALTER TABLE IF EXISTS public.profiles ADD COLUMN IF NOT EXISTS active_addons JSONB DEFAULT '[]'::jsonb;
 
 -- Update status CHECK constraint on profiles to support all active & inactive states
 ALTER TABLE IF EXISTS public.profiles DROP CONSTRAINT IF EXISTS profiles_status_check;
@@ -75,9 +76,11 @@ CREATE TABLE IF NOT EXISTS public.payments (
   user_id UUID NOT NULL,
   amount NUMERIC(10, 2) NOT NULL,
   total_fee NUMERIC(10, 2),
-  status TEXT DEFAULT 'Paid' CHECK (status IN ('Paid', 'Partial', 'Unpaid', 'Pending Approval', 'Pending', 'Failed')),
+  status TEXT DEFAULT 'Paid' CHECK (status IN ('Paid', 'Partial', 'Unpaid', 'Pending Approval', 'Pending', 'Failed', 'Rejected')),
   invoice_id TEXT UNIQUE,
   payment_method TEXT DEFAULT 'Credit Card',
+  payment_type TEXT DEFAULT 'membership', -- 'membership', 'addon', 'bundle'
+  item_name TEXT,
   proof_url TEXT,
   date TIMESTAMPTZ DEFAULT NOW(),
   created_at TIMESTAMPTZ DEFAULT NOW()
@@ -89,6 +92,8 @@ ALTER TABLE public.payments ENABLE ROW LEVEL SECURITY;
 -- Migration for existing payments table:
 ALTER TABLE IF EXISTS public.payments ADD COLUMN IF NOT EXISTS proof_url TEXT;
 ALTER TABLE IF EXISTS public.payments ADD COLUMN IF NOT EXISTS total_fee NUMERIC(10, 2);
+ALTER TABLE IF EXISTS public.payments ADD COLUMN IF NOT EXISTS payment_type TEXT DEFAULT 'membership';
+ALTER TABLE IF EXISTS public.payments ADD COLUMN IF NOT EXISTS item_name TEXT;
 ALTER TABLE IF EXISTS public.payments ALTER COLUMN total_fee DROP DEFAULT;
 
 -- Cleanup script: Fix existing rows where total_fee defaulted to 5000 instead of actual amount
@@ -228,17 +233,75 @@ CREATE POLICY "Allow all for gym_settings"
   USING (true)
   WITH CHECK (true);
 
--- Insert Default General Settings into gym_settings
-INSERT INTO public.gym_settings (key, value)
-VALUES
-  ('general_settings', '{
-    "gymName": "ABDULLAH GYM 1",
-    "whatsapp": "0320 8313000",
-    "email": "abdullahgym521@gmail.com",
-    "currency": "PKR",
-    "ladiesShift": "10:00 AM - 01:00 PM",
-    "gentsShift": "04:00 PM - 11:00 PM",
-    "address": "56Q5+69G, Rajput Colony Gujranwala, Pakistan"
-  }'::jsonb)
-ON CONFLICT (key) DO NOTHING;
+-- 6. Create Notifications Table (In-App & Push Alerts)
+CREATE TABLE IF NOT EXISTS public.notifications (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID NOT NULL,
+  title TEXT NOT NULL,
+  message TEXT NOT NULL,
+  type TEXT DEFAULT 'general', -- 'payment_approved', 'attendance_marked', 'profile_updated', 'fee_deadline', 'expired', 'general'
+  read BOOLEAN DEFAULT false,
+  action TEXT DEFAULT 'VIEW',
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Enable RLS for Notifications
+ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Allow all for notifications" ON public.notifications;
+
+CREATE POLICY "Allow all for notifications"
+  ON public.notifications FOR ALL
+  USING (true)
+  WITH CHECK (true);
+
+-- 8. Create Member Add-ons Table (Independent Add-On Subscriptions)
+CREATE TABLE IF NOT EXISTS public.member_addons (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID NOT NULL,
+  addon_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  price NUMERIC(10, 2) NOT NULL DEFAULT 1500.00,
+  icon TEXT DEFAULT '🏃',
+  start_date TIMESTAMPTZ DEFAULT NOW(),
+  expiry_date TIMESTAMPTZ NOT NULL,
+  days_remaining INTEGER DEFAULT 30,
+  status TEXT DEFAULT 'Active' CHECK (status IN ('Active', 'Expired', 'Cancelled', 'Pending')),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Enable RLS for Member Add-ons
+ALTER TABLE public.member_addons ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Allow all for member_addons" ON public.member_addons;
+CREATE POLICY "Allow all for member_addons"
+  ON public.member_addons FOR ALL
+  USING (true)
+  WITH CHECK (true);
+
+-- 9. Create Add-on Payments Table (Dedicated Payments for Add-ons ONLY)
+CREATE TABLE IF NOT EXISTS public.addon_payments (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID NOT NULL,
+  addon_id TEXT,
+  addon_name TEXT NOT NULL,
+  amount NUMERIC(10, 2) NOT NULL,
+  status TEXT DEFAULT 'Paid' CHECK (status IN ('Paid', 'Pending Approval', 'Rejected', 'Failed')),
+  invoice_id TEXT UNIQUE,
+  payment_method TEXT DEFAULT 'JazzCash Transfer',
+  proof_url TEXT,
+  date TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Enable RLS for Add-on Payments
+ALTER TABLE public.addon_payments ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Allow all for addon_payments" ON public.addon_payments;
+CREATE POLICY "Allow all for addon_payments"
+  ON public.addon_payments FOR ALL
+  USING (true)
+  WITH CHECK (true);
+
 

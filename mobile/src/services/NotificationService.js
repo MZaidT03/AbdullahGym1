@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
 const NOTIFICATIONS_STORAGE_KEY = '@abdullah_gym1_notifications';
 const PREFS_STORAGE_KEY = '@abdullah_gym1_push_prefs';
@@ -22,8 +23,54 @@ export const NotificationService = {
     }
   },
 
-  // Get all notifications from storage
-  async getNotifications() {
+  // Sync notifications from Supabase table for this user
+  async syncRemoteNotifications(userId) {
+    if (!userId || !isSupabaseConfigured()) return [];
+    try {
+      const { data: remoteList, error } = await supabase
+        .from('notifications')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(30);
+
+      if (error || !remoteList) return [];
+
+      const existing = await this.getLocalNotifications();
+      const existingMap = new Map();
+      existing.forEach((n) => existingMap.set(n.id || n.dedupeKey, n));
+
+      remoteList.forEach((r) => {
+        const idKey = `remote_${r.id}`;
+        if (!existingMap.has(idKey)) {
+          existingMap.set(idKey, {
+            id: idKey,
+            title: r.title,
+            message: r.message,
+            type: r.type || 'general',
+            timestamp: r.created_at || new Date().toISOString(),
+            dateStr: new Date(r.created_at || Date.now()).toDateString(),
+            read: r.read || false,
+            action: r.action || 'VIEW',
+            dedupeKey: `remote_${r.id}`,
+          });
+        }
+      });
+
+      const merged = Array.from(existingMap.values())
+        .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+        .slice(0, 30);
+
+      await AsyncStorage.setItem(NOTIFICATIONS_STORAGE_KEY, JSON.stringify(merged));
+      return merged;
+    } catch (e) {
+      console.warn('Error syncing remote notifications:', e);
+      return [];
+    }
+  },
+
+  // Get local notifications from storage
+  async getLocalNotifications() {
     try {
       const raw = await AsyncStorage.getItem(NOTIFICATIONS_STORAGE_KEY);
       if (!raw) return [];
@@ -33,13 +80,25 @@ export const NotificationService = {
     }
   },
 
+  // Get all notifications (syncs with Supabase if userId provided)
+  async getNotifications(userId = null) {
+    try {
+      if (userId) {
+        await this.syncRemoteNotifications(userId);
+      }
+      return await this.getLocalNotifications();
+    } catch (e) {
+      return await this.getLocalNotifications();
+    }
+  },
+
   // Add a new notification (deduplicating by key/id within the same day)
   async addNotification(notif) {
     try {
       const isEnabled = await this.arePushNotificationsEnabled();
       if (!isEnabled && notif.type !== 'system') return;
 
-      const existing = await this.getNotifications();
+      const existing = await this.getLocalNotifications();
       const todayDateStr = new Date().toDateString();
 
       // Avoid spamming the exact same fee alert on the same calendar day
@@ -53,14 +112,13 @@ export const NotificationService = {
         id: notif.id || `notif_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
         title: notif.title,
         message: notif.message,
-        type: notif.type || 'fee_deadline', // 'fee_deadline' | 'grace_period' | 'payment_confirmed' | 'general'
+        type: notif.type || 'fee_deadline', // 'fee_deadline' | 'payment_confirmed' | 'payment_approved' | 'attendance_marked' | 'profile_updated' | 'expired' | 'general'
         timestamp: new Date().toISOString(),
         dateStr: todayDateStr,
         read: false,
         action: notif.action || 'PAY_FEE',
         dedupeKey: notif.dedupeKey || null,
         daysRemaining: notif.daysRemaining,
-        overdueDays: notif.overdueDays,
       };
 
       const updated = [newEntry, ...existing].slice(0, 30); // Keep latest 30 notifications
@@ -74,7 +132,7 @@ export const NotificationService = {
   // Mark all notifications as read
   async markAllAsRead() {
     try {
-      const list = await this.getNotifications();
+      const list = await this.getLocalNotifications();
       const updated = list.map((n) => ({ ...n, read: true }));
       await AsyncStorage.setItem(NOTIFICATIONS_STORAGE_KEY, JSON.stringify(updated));
       return updated;
@@ -98,54 +156,21 @@ export const NotificationService = {
     if (!user) return null;
 
     const daysRemaining = user.daysRemaining !== undefined ? user.daysRemaining : 30;
-    const overdueDays = user.overdueDays !== undefined ? user.overdueDays : 0;
     const planName = user.plan || 'Pro Membership';
-    const memberFee = user.monthlyFee || 5000;
+    const isExpired = daysRemaining <= 0 || user.status === 'Expired' || user.status === 'Deactivated' || user.status === 'Suspended';
 
-    // 1. In 7-Day Grace Period (Day 1 to 7)
-    if (overdueDays > 0 && overdueDays <= 7) {
-      if (overdueDays >= 6) {
-        return await this.addNotification({
-          title: '🚨 Final Warning: Grace Period Ending!',
-          message: `Your membership is in Day ${overdueDays} of 7 grace period. Account will be DEACTIVATED after Day 7! Pay PKR ${memberFee.toLocaleString()} now.`,
-          type: 'grace_period',
-          dedupeKey: `grace_day_${overdueDays}`,
-          overdueDays: overdueDays,
-          action: 'PAY_FEE',
-        });
-      } else if (overdueDays >= 3) {
-        return await this.addNotification({
-          title: '⚠️ Urgent: 7-Day Grace Period Active',
-          message: `Day ${overdueDays} of 7 grace period for ${planName}. Please submit your monthly renewal fee to maintain gym access.`,
-          type: 'grace_period',
-          dedupeKey: `grace_day_${overdueDays}`,
-          overdueDays: overdueDays,
-          action: 'PAY_FEE',
-        });
-      } else {
-        return await this.addNotification({
-          title: '⚠️ Membership Expired - Grace Period Active',
-          message: `Your month completed today (Grace Day ${overdueDays}/7). You have 7 days to clear your monthly fee of PKR ${memberFee.toLocaleString()}.`,
-          type: 'grace_period',
-          dedupeKey: `grace_day_${overdueDays}`,
-          overdueDays: overdueDays,
-          action: 'PAY_FEE',
-        });
-      }
-    }
-
-    // 2. Account Expired / Deactivated (>7 days)
-    if (overdueDays > 7 || user.status === 'Expired' || user.status === 'Suspended' || user.status === 'Deactivated' || user.status === 'Inactive') {
+    // 1. Account Expired / Deactivated (Month completed)
+    if (isExpired) {
       return await this.addNotification({
-        title: '🔒 Account Expired / Deactivated',
-        message: 'Your 7-day grace period has ended. Submit your monthly payment in the Payments tab to reactivate check-in access.',
+        title: '🔒 Membership Expired - Account Deactivated',
+        message: 'Your monthly membership validity has ended. Submit your renewal fee in the Payments tab to reactivate check-in access.',
         type: 'expired',
-        dedupeKey: 'account_expired',
+        dedupeKey: 'account_expired_notice',
         action: 'PAY_FEE',
       });
     }
 
-    // 3. Last 10 Days Renewal Window
+    // 2. Last 10 Days Renewal Window
     if (daysRemaining === 1) {
       return await this.addNotification({
         title: '🚨 Urgent: Fee Due Tomorrow!',
@@ -200,7 +225,6 @@ export const NotificationService = {
     const paidPayments = payments.filter((p) => p.status === 'Paid');
     if (paidPayments.length === 0) return null;
 
-    // Get latest approved payment
     const latestPaid = paidPayments[0];
     const amount = Number(latestPaid.total_fee || latestPaid.amount || 5000).toLocaleString();
     const planName = user?.plan || 'Pro Membership';

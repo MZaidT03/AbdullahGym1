@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, Animated, StatusBar, Platform } from 'react-native';
+import { View, Text, StyleSheet, Animated, StatusBar, Platform, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
 import colors from '../constants/colors';
@@ -84,7 +84,7 @@ export const SplashScreen = ({ navigation }) => {
           },
         ]}
       >
-        {/* Animated Glowing Logo Badge */}
+        {/* Animated Glowing Official Logo Badge */}
         <Animated.View
           style={[
             styles.logoWrapper,
@@ -94,9 +94,11 @@ export const SplashScreen = ({ navigation }) => {
           ]}
         >
           <View style={styles.logoOuterRing}>
-            <View style={styles.logoInnerCircle}>
-              <Ionicons name="barbell" size={46} color={colors.white} />
-            </View>
+            <Image
+              source={require('../../assets/logo.png')}
+              style={styles.logoImage}
+              resizeMode="cover"
+            />
           </View>
         </Animated.View>
 
@@ -157,27 +159,25 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   logoOuterRing: {
-    width: 104,
-    height: 104,
-    borderRadius: 52,
-    backgroundColor: 'rgba(22, 196, 91, 0.25)',
+    width: 140,
+    height: 140,
+    borderRadius: 70,
+    backgroundColor: '#0A0F1D',
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 2,
-    borderColor: 'rgba(22, 196, 91, 0.5)',
-  },
-  logoInnerCircle: {
-    width: 82,
-    height: 82,
-    borderRadius: 41,
-    backgroundColor: colors.primary,
-    justifyContent: 'center',
-    alignItems: 'center',
+    borderWidth: 3,
+    borderColor: 'rgba(22, 196, 91, 0.6)',
     shadowColor: colors.primary,
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.5,
-    shadowRadius: 16,
-    elevation: 12,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.6,
+    shadowRadius: 20,
+    elevation: 16,
+    overflow: 'hidden',
+  },
+  logoImage: {
+    width: 134,
+    height: 134,
+    borderRadius: 67,
   },
   brandTitle: {
     fontSize: 30,

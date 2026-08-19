@@ -12,7 +12,7 @@ export const CheckInButton = ({ isCheckedIn = false, checkInTime = null, isDeact
     if (isDeactivated) {
       showDialog({
         title: 'Account Deactivated ❌',
-        message: 'Your 7-day grace period has expired. Please pay your monthly subscription fee to reactivate check-in access.',
+        message: 'Your monthly membership validity has ended. Please submit your renewal fee in the Payments tab to reactivate check-in access.',
         type: 'deactivated',
         confirmText: 'Got It',
       });
@@ -78,7 +78,7 @@ export const CheckInButton = ({ isCheckedIn = false, checkInTime = null, isDeact
         <View style={[styles.statusDot, isCheckedIn ? styles.dotGreen : isDeactivated ? styles.dotRed : styles.dotAmber]} />
         <Text style={styles.subtext}>
           {isDeactivated
-            ? 'Access disabled (Overdue limit)'
+            ? 'Access disabled (Membership expired - Fee due)'
             : isCheckedIn
             ? `Checked in for today${checkInTime ? ` • ${checkInTime}` : ''}`
             : 'Ready for today’s session'}

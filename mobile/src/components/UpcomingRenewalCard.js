@@ -10,14 +10,19 @@ export const UpcomingRenewalCard = ({
   status = 'Active',
   onRenewPress,
 }) => {
-  const isDeactivated = status === 'Suspended' || status === 'Inactive' || status === 'Deactivated' || overdueDays > 7;
+  const isDeactivated =
+    status === 'Suspended' ||
+    status === 'Inactive' ||
+    status === 'Deactivated' ||
+    status === 'Expired' ||
+    daysRemaining <= 0;
 
-  // Active Period (>10 days remaining & 0 overdue): Keep dashboard clean
-  if (daysRemaining > 10 && overdueDays === 0 && !isDeactivated) {
+  // Active Period (>10 days remaining & not deactivated): Keep dashboard clean
+  if (daysRemaining > 10 && !isDeactivated) {
     return null;
   }
 
-  // Determine Banner Variant: 'yellow' (amber), 'red' (danger), 'deactivated' (critical red), or 'emerald'
+  // Determine Banner Variant: 'yellow' (amber), 'deactivated' (critical red), or 'emerald'
   let variant = 'emerald';
   let title = 'Renewal Window Open 🔔';
   let description = `Your membership renewal is open (${daysRemaining} days remaining).`;
@@ -25,19 +30,9 @@ export const UpcomingRenewalCard = ({
 
   if (isDeactivated) {
     variant = 'deactivated';
-    title = 'Account Expired ❌';
-    description = '7-day grace period exceeded. Please pay your fee to reactivate gym access.';
+    title = 'Membership Expired ❌';
+    description = 'Your monthly membership has ended. Submit your renewal fee to reactivate gym access.';
     iconName = 'close-circle-outline';
-  } else if (overdueDays >= 4 && overdueDays <= 7) {
-    variant = 'red';
-    title = 'Grace Period Ending 🚨';
-    description = `Day ${overdueDays} of 7 grace period. Account will be deactivated after day 7!`;
-    iconName = 'warning-outline';
-  } else if (overdueDays >= 1 && overdueDays <= 3) {
-    variant = 'yellow';
-    title = '7-Day Grace Period Active ⚠️';
-    description = `Month completed (Day ${overdueDays} of 7). Please submit your monthly renewal fee.`;
-    iconName = 'alert-circle-outline';
   } else if (daysRemaining <= 3 && daysRemaining >= 0) {
     variant = 'yellow';
     title = 'Expiring Soon ⏳';

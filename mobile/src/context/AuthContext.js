@@ -5,56 +5,49 @@ import NotificationService from '../services/NotificationService';
 
 const LOCAL_STORAGE_KEY = '@abdullah_gym1_user';
 
+export const cleanPlanName = (planStr = '') => {
+  if (!planStr) return 'Pro Membership';
+  let clean = planStr;
+  if (clean.includes(' [Add-ons:')) {
+    clean = clean.split(' [Add-ons:')[0];
+  }
+  if (clean.includes(' [Next:')) {
+    clean = clean.split(' [Next:')[0];
+  }
+  return clean.trim() || 'Pro Membership';
+};
+
 export const resolvePlanFee = (planName = '', paymentFee = null, profileFee = null) => {
-  if (profileFee && Number(profileFee) > 0) return Number(profileFee);
-  if (paymentFee && Number(paymentFee) > 0) return Number(paymentFee);
+  const cleanPlan = cleanPlanName(planName);
 
-  const str = (planName || '').trim();
-
-  // Extract embedded PKR price in plan string e.g. "Pro Plus (PKR 12,000/mo)"
-  const pkrMatch = str.match(/(?:PKR|Rs\.?)\s*([\d,]+)/i);
+  // Extract embedded PKR price in clean base plan string e.g. "VIP Champion Pass (PKR 9,000/mo)"
+  const pkrMatch = cleanPlan.match(/(?:PKR|Rs\.?)\s*([\d,]+)/i);
   if (pkrMatch && pkrMatch[1]) {
     const parsed = parseInt(pkrMatch[1].replace(/,/g, ''), 10);
     if (!isNaN(parsed) && parsed > 0) return parsed;
   }
 
-  const slashMatch = str.match(/([\d,]+)\s*(?:\/mo|\/month|\/day)/i);
+  const slashMatch = cleanPlan.match(/([\d,]+)\s*(?:\/mo|\/month|\/day)/i);
   if (slashMatch && slashMatch[1]) {
     const parsed = parseInt(slashMatch[1].replace(/,/g, ''), 10);
     if (!isNaN(parsed) && parsed > 0) return parsed;
   }
 
   // Keyword / Plan Tier mapping
-  const lower = str.toLowerCase();
-  if (
-    lower.includes('pro plus') ||
-    lower.includes('pro+') ||
-    lower.includes('pro-plus') ||
-    lower.includes('12000') ||
-    lower.includes('12,000')
-  ) {
-    return 12000;
-  }
-  if (
-    lower.includes('vip') ||
-    lower.includes('champion') ||
-    lower.includes('9000') ||
-    lower.includes('9,000')
-  ) {
+  const lower = cleanPlan.toLowerCase();
+  if (lower.includes('vip') || lower.includes('champion') || lower.includes('9000')) {
     return 9000;
   }
-  if (
-    lower.includes('standard') ||
-    lower.includes('3500') ||
-    lower.includes('3,500')
-  ) {
+  if (lower.includes('pro plus') || lower.includes('pro+') || lower.includes('12000')) {
+    return 12000;
+  }
+  if (lower.includes('standard') || lower.includes('3500')) {
     return 3500;
   }
   if (
     lower.includes('daily') ||
     lower.includes('visitor') ||
     lower.includes('walk-in') ||
-    lower.includes('walk in') ||
     lower.includes('500')
   ) {
     return 500;
@@ -62,6 +55,9 @@ export const resolvePlanFee = (planName = '', paymentFee = null, profileFee = nu
   if (lower.includes('pro')) {
     return 5000;
   }
+
+  if (profileFee && Number(profileFee) > 0) return Number(profileFee);
+  if (paymentFee && Number(paymentFee) > 0) return Number(paymentFee);
 
   return 5000;
 };
@@ -127,41 +123,39 @@ export const AuthProvider = ({ children }) => {
         rawDbStatus === 'suspended' ||
         rawDbStatus === 'disabled' ||
         rawDbStatus === 'blocked';
-      const isDbExpired =
-        rawDbStatus === 'expired' ||
-        rawDbStatus === 'inactive' ||
-        rawDbStatus === 'deactivated' ||
-        rawDbStatus === 'unpaid';
-      const isDbInactive = isDbSuspended || isDbExpired;
 
       let calculatedDays = 0;
       let overdueDays = 0;
-      let effectiveStatus = isDbSuspended
-        ? 'Suspended'
-        : isDbExpired
-        ? 'Expired'
-        : 'Active';
+      let effectiveStatus = isDbSuspended ? 'Suspended' : 'Active';
       let lastPaymentRecord = null;
       let calculatedExpiryDate = null;
       let calculatedRenewalOpenDate = null;
       const now = new Date();
 
-      if (isSupabaseConfigured() && userId && !isDbInactive) {
+      if (isSupabaseConfigured() && userId && !isDbSuspended) {
         try {
           const { data: userPayments } = await supabase
             .from('payments')
-            .select('date, status, amount, total_fee')
+            .select('date, status, amount, total_fee, payment_type, item_name')
             .eq('user_id', userId)
             .eq('status', 'Paid')
             .order('date', { ascending: true });
 
-          if (userPayments && userPayments.length > 0) {
-            lastPaymentRecord = userPayments[userPayments.length - 1];
+          // Filter strictly monthly gym membership payments (exclude standalone addon payments)
+          const monthlyPayments = (userPayments || []).filter((pay) => {
+            if (pay.payment_type && pay.payment_type === 'addon') return false;
+            const itName = (pay.item_name || '').toLowerCase();
+            if (itName.includes('cardio') || itName.includes('add-on') || itName.includes('addon')) return false;
+            return true;
+          });
 
-            // Stack consecutive 30-day payment cycles
+          if (monthlyPayments && monthlyPayments.length > 0) {
+            lastPaymentRecord = monthlyPayments[monthlyPayments.length - 1];
+
+            // Stack consecutive 30-day payment cycles for monthly gym membership
             let runningExpiry = null;
 
-            userPayments.forEach((pay) => {
+            monthlyPayments.forEach((pay) => {
               if (!pay.date) return;
               const payDate = new Date(pay.date);
 
@@ -190,50 +184,35 @@ export const AuthProvider = ({ children }) => {
                 effectiveStatus = 'Active';
               } else {
                 calculatedDays = 0;
-                overdueDays = Math.abs(diffDays);
-                effectiveStatus = 'Expired';
+                overdueDays = Math.max(1, Math.abs(diffDays));
+                effectiveStatus = 'Deactivated';
               }
             }
           } else {
-            // Member has NO paid payment record in database
+            // Member has NO paid monthly membership record in database
             calculatedDays = 0;
             overdueDays = 1;
-            effectiveStatus = 'Expired';
+            effectiveStatus = 'Deactivated';
           }
         } catch (payErr) {
           console.warn('Notice calculating remaining days:', payErr);
           calculatedDays = 0;
           overdueDays = 1;
-          effectiveStatus = 'Expired';
+          effectiveStatus = 'Deactivated';
         }
-      } else if (isDbInactive) {
-        calculatedDays = 0;
-        effectiveStatus = isDbSuspended ? 'Suspended' : 'Expired';
       }
 
       // Check explicit days_remaining on profile if present
-      if (data?.days_remaining !== undefined && data?.days_remaining !== null && Number(data.days_remaining) <= 0) {
-        calculatedDays = 0;
-        effectiveStatus = isDbSuspended ? 'Suspended' : 'Expired';
+      if (data?.days_remaining !== undefined && data?.days_remaining !== null) {
+        const explicitDays = Number(data.days_remaining);
+        if (explicitDays <= 0) {
+          calculatedDays = 0;
+          effectiveStatus = 'Deactivated';
+        }
       }
 
-      const isFinalInactive =
-        effectiveStatus === 'Expired' ||
-        effectiveStatus === 'Suspended' ||
-        effectiveStatus === 'Inactive' ||
-        isDbInactive ||
-        calculatedDays <= 0;
-
-      if (isFinalInactive) {
-        effectiveStatus = isDbSuspended ? 'Suspended' : 'Expired';
-        calculatedDays = 0;
-        if (isSupabaseConfigured() && userId && data?.status === 'Active' && !isDbSuspended) {
-          try {
-            await supabase.from('profiles').update({ status: 'Expired' }).eq('id', userId);
-          } catch (stErr) {
-            console.warn('Notice updating expired status:', stErr);
-          }
-        }
+      // Only permanently kick out if explicitly Suspended/Blocked by Admin
+      if (isDbSuspended) {
         try {
           await supabase.auth.signOut();
         } catch (soErr) {}
@@ -246,13 +225,76 @@ export const AuthProvider = ({ children }) => {
         return null;
       }
 
+      const cleanPlan = cleanPlanName(data?.plan);
       const resolvedMonthlyFee = resolvePlanFee(
-        data?.plan,
+        cleanPlan,
         lastPaymentRecord?.total_fee || lastPaymentRecord?.amount,
         data?.monthly_fee || data?.fee || data?.price
       );
 
-      const isRenewalEligible = calculatedDays <= 10 || overdueDays > 0 || effectiveStatus !== 'Active';
+      // Fetch Independent Add-ons from member_addons table or fallback to profiles.active_addons
+      let rawAddons = [];
+      if (isSupabaseConfigured() && userId) {
+        try {
+          const { data: dbAddons } = await supabase
+            .from('member_addons')
+            .select('*')
+            .eq('user_id', userId)
+            .neq('status', 'Cancelled');
+
+          if (dbAddons && dbAddons.length > 0) {
+            rawAddons = dbAddons;
+          } else if (data?.active_addons) {
+            rawAddons = Array.isArray(data.active_addons)
+              ? data.active_addons
+              : typeof data.active_addons === 'string'
+              ? JSON.parse(data.active_addons)
+              : [];
+          }
+        } catch (adErr) {
+          if (data?.active_addons) {
+            try {
+              rawAddons = Array.isArray(data.active_addons)
+                ? data.active_addons
+                : JSON.parse(data.active_addons);
+            } catch (e) {}
+          }
+        }
+      } else if (data?.active_addons) {
+        try {
+          rawAddons = Array.isArray(data.active_addons)
+            ? data.active_addons
+            : JSON.parse(data.active_addons);
+        } catch (e) {}
+      }
+
+      const parsedActiveAddons = rawAddons.map((addon) => {
+        let addonDays = 30;
+        let addonExpiry = null;
+        if (addon.expiry_date) {
+          addonExpiry = new Date(addon.expiry_date);
+          const diff = addonExpiry.getTime() - now.getTime();
+          addonDays = Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
+        } else if (addon.start_date) {
+          addonExpiry = new Date(new Date(addon.start_date).getTime() + 30 * 86400000);
+          const diff = addonExpiry.getTime() - now.getTime();
+          addonDays = Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
+        }
+
+        return {
+          id: addon.id || addon.addon_id || 'addon-cardio',
+          addonId: addon.addon_id || addon.id,
+          name: addon.name || 'Cardio Access Plan',
+          price: Number(addon.price) || 1500,
+          icon: addon.icon || '🏃',
+          startDate: addon.start_date || now.toISOString(),
+          expiryDate: addonExpiry ? addonExpiry.toISOString() : null,
+          daysRemaining: addonDays,
+          status: addonDays > 0 ? 'Active' : 'Expired',
+        };
+      });
+
+      const isRenewalEligible = calculatedDays <= 10 || effectiveStatus !== 'Active';
 
       const userData = {
         id: userId,
@@ -260,9 +302,10 @@ export const AuthProvider = ({ children }) => {
         fullName: data?.full_name || 'Abdullah Member',
         email: userEmail || data?.email || 'member@example.com',
         memberId: data?.member_id || 'GP-8472-991',
-        plan: data?.plan || 'Pro Membership',
+        plan: cleanPlan,
         upcomingPlan: data?.upcoming_plan || data?.next_plan || null,
         monthlyFee: resolvedMonthlyFee,
+        activeAddons: parsedActiveAddons,
         avatar: data?.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=250',
         gender: data?.gender || 'Male',
         daysRemaining: calculatedDays,
@@ -331,7 +374,7 @@ export const AuthProvider = ({ children }) => {
         if (initialSession) {
           const profile = await fetchProfile(initialSession.user.id, initialSession.user.email);
           const pStatus = (profile?.status || '').toLowerCase();
-          if (profile && pStatus !== 'suspended' && pStatus !== 'inactive' && pStatus !== 'deactivated' && pStatus !== 'expired' && pStatus !== 'unpaid') {
+          if (profile && pStatus !== 'suspended' && pStatus !== 'disabled' && pStatus !== 'blocked') {
             setSession(initialSession);
             setIsAuthenticated(true);
           } else {
@@ -351,7 +394,7 @@ export const AuthProvider = ({ children }) => {
           if (newSession) {
             const profile = await fetchProfile(newSession.user.id, newSession.user.email);
             const pStatus = (profile?.status || '').toLowerCase();
-            if (profile && pStatus !== 'suspended' && pStatus !== 'inactive' && pStatus !== 'deactivated' && pStatus !== 'expired' && pStatus !== 'unpaid') {
+            if (profile && pStatus !== 'suspended' && pStatus !== 'disabled' && pStatus !== 'blocked') {
               setSession(newSession);
               setIsAuthenticated(true);
             } else {
@@ -372,7 +415,7 @@ export const AuthProvider = ({ children }) => {
         if (storedUser) {
           const parsed = JSON.parse(storedUser);
           const pStatus = (parsed?.status || '').toLowerCase();
-          if (pStatus !== 'suspended' && pStatus !== 'inactive' && pStatus !== 'deactivated' && pStatus !== 'expired' && pStatus !== 'unpaid') {
+          if (pStatus !== 'suspended' && pStatus !== 'disabled' && pStatus !== 'blocked') {
             setUser(parsed);
             setIsAuthenticated(true);
           } else {
@@ -420,7 +463,6 @@ export const AuthProvider = ({ children }) => {
 
           const rawStatus = (dbProf?.status || '').trim().toLowerCase();
           const isSuspended = rawStatus === 'suspended' || rawStatus === 'blocked' || rawStatus === 'disabled';
-          const isDbExpired = rawStatus === 'expired' || rawStatus === 'inactive' || rawStatus === 'deactivated' || rawStatus === 'unpaid';
 
           if (isSuspended) {
             await supabase.auth.signOut();
@@ -435,25 +477,10 @@ export const AuthProvider = ({ children }) => {
             };
           }
 
-          if (isDbExpired) {
-            await supabase.auth.signOut();
-            try { await AsyncStorage.removeItem(LOCAL_STORAGE_KEY); } catch (e) {}
-            setSession(null);
-            setUser(null);
-            setIsAuthenticated(false);
-            return {
-              success: false,
-              isExpired: true,
-              message: 'Account Expired ❌: Your gym membership plan has expired. Please pay your renewal fee at the front desk to reactivate your access.',
-            };
-          }
-
           const profile = await fetchProfile(data.user.id, data.user.email);
           const pStatus = (profile?.status || '').toLowerCase();
-          const daysLeft = profile?.daysRemaining !== undefined ? Number(profile.daysRemaining) : null;
-          const isProfileActive = profile && pStatus === 'active' && (daysLeft === null || daysLeft > 0);
 
-          if (isProfileActive) {
+          if (profile && pStatus !== 'suspended' && pStatus !== 'disabled' && pStatus !== 'blocked') {
             setSession(data.session);
             setIsAuthenticated(true);
             try {
@@ -468,19 +495,10 @@ export const AuthProvider = ({ children }) => {
             setSession(null);
             setUser(null);
             setIsAuthenticated(false);
-
-            if (pStatus === 'suspended') {
-              return {
-                success: false,
-                isSuspended: true,
-                message: 'Account Suspended ⛔: Your gym account has been suspended. Please contact the front desk.',
-              };
-            }
-
             return {
               success: false,
-              isExpired: true,
-              message: 'Account Expired ❌: Your gym membership plan has expired. Please pay your renewal fee at the front desk to reactivate your access.',
+              isSuspended: true,
+              message: 'Account Suspended ⛔: Your gym account has been suspended. Please contact the front desk.',
             };
           }
         }
@@ -547,6 +565,29 @@ export const AuthProvider = ({ children }) => {
     return { alreadyCheckedIn: false, time: timeStr };
   };
 
+  const removeMemberAddon = async (addonId) => {
+    if (!user?.id) return { success: false, message: 'User not logged in' };
+    try {
+      if (isSupabaseConfigured()) {
+        try {
+          await supabase
+            .from('member_addons')
+            .update({ status: 'Cancelled', updated_at: new Date().toISOString() })
+            .eq('user_id', user.id)
+            .or(`id.eq.${addonId},addon_id.eq.${addonId}`);
+        } catch (e) {}
+
+        const updated = (user.activeAddons || []).filter((a) => a.id !== addonId && a.addonId !== addonId);
+        await supabase.from('profiles').update({ active_addons: updated }).eq('id', user.id);
+      }
+      await fetchProfile(user.id, user.email);
+      return { success: true };
+    } catch (err) {
+      console.error('Error removing addon:', err);
+      return { success: false, message: err.message || 'Failed to remove add-on' };
+    }
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -560,6 +601,7 @@ export const AuthProvider = ({ children }) => {
         logout,
         toggleCheckIn: checkInMember,
         checkInMember,
+        removeMemberAddon,
         updateUserProfile,
         refreshProfile,
       }}

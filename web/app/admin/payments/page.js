@@ -130,81 +130,117 @@ export default function PaymentsAdminPage() {
           .select("*")
           .order("date", { ascending: false });
 
-        if (!error && payData) {
-          const formatted = payData.map((item) => {
-            const prof = profileMap.get(item.user_id);
-            const isWalkIn =
-              item.invoice_id?.startsWith("INV-WALK") ||
-              prof?.member_id?.startsWith("GP-WALK-") ||
-              prof?.role === "walkin" ||
-              prof?.plan?.toLowerCase().includes("walk-in") ||
-              prof?.plan?.toLowerCase().includes("daily") ||
-              item.payment_method?.toLowerCase().includes("walk-in");
+        let addonPayData = [];
+        try {
+          const { data: aData } = await supabase
+            .from("addon_payments")
+            .select("*")
+            .order("date", { ascending: false });
+          if (aData) addonPayData = aData;
+        } catch (e) {}
 
-            let amt = parseFloat(item.amount) || 0;
-            const mPlanName = prof?.plan || "Pro Membership";
-            const matchedPlan = (planData || availablePlans || []).find(
-              (p) =>
-                p.name.toLowerCase() === mPlanName.toLowerCase() ||
-                mPlanName.toLowerCase().includes(p.name.toLowerCase())
-            );
+        const formattedGym = (!error && payData ? payData : []).map((item) => {
+          const prof = profileMap.get(item.user_id);
+          const isWalkIn =
+            item.invoice_id?.startsWith("INV-WALK") ||
+            prof?.member_id?.startsWith("GP-WALK-") ||
+            prof?.role === "walkin" ||
+            prof?.plan?.toLowerCase().includes("walk-in") ||
+            prof?.plan?.toLowerCase().includes("daily") ||
+            item.payment_method?.toLowerCase().includes("walk-in");
 
-            let tFee = 5000;
-            if (isWalkIn) {
-              tFee = amt > 0 ? amt : 500;
-              amt = tFee;
-            } else {
-              if (item.total_fee && parseFloat(item.total_fee) > 0) {
-                tFee = parseFloat(item.total_fee);
-              } else if (matchedPlan) {
-                tFee = parseFloat(matchedPlan.monthly_price || matchedPlan.monthlyPrice) || 5000;
-              }
+          let amt = parseFloat(item.amount) || 0;
+          const cleanProfPlan = (prof?.plan || "Pro Membership").split(" [Add-ons:")[0].split(" [Next:")[0];
+          const matchedPlan = (planData || availablePlans || []).find(
+            (p) =>
+              p.name.toLowerCase() === cleanProfPlan.toLowerCase() ||
+              cleanProfPlan.toLowerCase().includes(p.name.toLowerCase())
+          );
 
-              if (amt <= 0) {
-                amt = parseFloat(prof?.fee_paid) || tFee;
-              }
+          let tFee = 5000;
+          if (isWalkIn) {
+            tFee = amt > 0 ? amt : 500;
+            amt = tFee;
+          } else {
+            if (item.total_fee && parseFloat(item.total_fee) > 0) {
+              tFee = parseFloat(item.total_fee);
+            } else if (matchedPlan) {
+              tFee = parseFloat(matchedPlan.monthly_price || matchedPlan.monthlyPrice) || 5000;
             }
 
-            let calculatedStatus = "Unpaid";
-
-            if (item.status === "Rejected") {
-              calculatedStatus = "Rejected";
-            } else if (item.status === "Pending Approval" || item.proof_url) {
-              calculatedStatus = "Pending Approval";
-            } else if (item.status === "Paid" || amt > 0 || isWalkIn) {
-              calculatedStatus = "Paid";
-            } else {
-              calculatedStatus = "Unpaid";
+            if (amt <= 0) {
+              amt = parseFloat(prof?.fee_paid) || tFee;
             }
+          }
 
-            return {
-              id: item.id,
-              user_id: item.user_id,
-              invoice_id: item.invoice_id || `INV-${item.id.slice(0, 4)}`,
-              member_name: prof?.full_name || item.member_name || "Gym Member",
-              member_id: prof?.member_id || (isWalkIn ? "GP-WALK-GUEST" : "GP-MEMBER"),
-              plan: isWalkIn ? "Daily Walk-In Pass" : prof?.plan || "Standard Membership",
-              raw_amount: amt,
-              raw_total_fee: tFee,
-              amount: `PKR ${Number(amt).toLocaleString()}`,
-              total_fee: `PKR ${Number(tFee).toLocaleString()}`,
-              date: item.date
-                ? new Date(item.date).toLocaleDateString([], {
-                  month: "short",
-                  day: "numeric",
-                  year: "numeric",
-                })
-                : new Date().toLocaleDateString(),
-              method: item.payment_method || item.method || "Cash / Desk",
-              status: calculatedStatus,
-              proof_url: item.proof_url || null,
-              is_walk_in: isWalkIn,
-            };
-          });
+          let calculatedStatus = "Unpaid";
+          if (item.status === "Rejected") calculatedStatus = "Rejected";
+          else if (item.status === "Pending Approval" || item.proof_url) calculatedStatus = "Pending Approval";
+          else if (item.status === "Paid" || amt > 0 || isWalkIn) calculatedStatus = "Paid";
+          else calculatedStatus = "Unpaid";
 
-          setPayments(formatted);
-          loadedFromSupabase = true;
-        }
+          return {
+            id: item.id,
+            user_id: item.user_id,
+            is_addon: false,
+            invoice_id: item.invoice_id || `INV-${item.id.slice(0, 4)}`,
+            member_name: prof?.full_name || item.member_name || "Gym Member",
+            member_id: prof?.member_id || (isWalkIn ? "GP-WALK-GUEST" : "GP-MEMBER"),
+            plan: isWalkIn ? "Daily Walk-In Pass" : cleanProfPlan,
+            raw_amount: amt,
+            raw_total_fee: tFee,
+            amount: `PKR ${Number(amt).toLocaleString()}`,
+            total_fee: `PKR ${Number(tFee).toLocaleString()}`,
+            date: item.date
+              ? new Date(item.date).toLocaleDateString([], {
+                month: "short",
+                day: "numeric",
+                year: "numeric",
+              })
+              : new Date().toLocaleDateString(),
+            method: item.payment_method || item.method || "Cash / Desk",
+            status: calculatedStatus,
+            proof_url: item.proof_url || null,
+            is_walk_in: isWalkIn,
+          };
+        });
+
+        const formattedAddon = addonPayData.map((item) => {
+          const prof = profileMap.get(item.user_id);
+          let amt = parseFloat(item.amount) || 1500;
+          let calculatedStatus = "Unpaid";
+          if (item.status === "Rejected") calculatedStatus = "Rejected";
+          else if (item.status === "Pending Approval" || item.proof_url) calculatedStatus = "Pending Approval";
+          else if (item.status === "Paid") calculatedStatus = "Paid";
+
+          return {
+            id: item.id,
+            user_id: item.user_id,
+            is_addon: true,
+            invoice_id: item.invoice_id || `INV-ADD-${item.id.slice(0, 4)}`,
+            member_name: prof?.full_name || "Gym Member",
+            member_id: prof?.member_id || "GP-MEMBER",
+            plan: `${item.addon_name || "Cardio Access Pass"} (Add-on)`,
+            raw_amount: amt,
+            raw_total_fee: amt,
+            amount: `PKR ${Number(amt).toLocaleString()}`,
+            total_fee: `PKR ${Number(amt).toLocaleString()}`,
+            date: item.date
+              ? new Date(item.date).toLocaleDateString([], {
+                month: "short",
+                day: "numeric",
+                year: "numeric",
+              })
+              : new Date().toLocaleDateString(),
+            method: item.payment_method || "JazzCash Transfer",
+            status: calculatedStatus,
+            proof_url: item.proof_url || null,
+            is_walk_in: false,
+          };
+        });
+
+        setPayments([...formattedGym, ...formattedAddon]);
+        loadedFromSupabase = true;
       } catch (err) {
         console.warn("Supabase payments fetch exception:", err);
       }
@@ -234,7 +270,7 @@ export default function PaymentsAdminPage() {
   };
 
   const handleApprovePayment = async (targetMember, explicitProofUrl = null, explicitPaymentId = null) => {
-    setStatusMsg(`🎉 Approved payment for ${targetMember.full_name || "member"}! Push notification dispatched & 30 days added to membership pass.`);
+    setStatusMsg(`🎉 Approved payment for ${targetMember.full_name || "member"}! Push notification dispatched.`);
 
     const targetUserId = targetMember.user_id || targetMember.id;
     let targetPaymentId = explicitPaymentId || targetMember.payment_id;
@@ -246,17 +282,14 @@ export default function PaymentsAdminPage() {
       targetPaymentId = pendingPay?.id;
     }
 
+    const matchingItem = payments.find((p) => p.id === targetPaymentId);
+    const isAddonPayment = matchingItem?.is_addon || targetPaymentId?.startsWith("INV-ADD");
+
     setPayments((prev) =>
       prev.map((p) =>
-        (targetPaymentId && p.id === targetPaymentId) || (!targetPaymentId && p.user_id === targetUserId && p.status === "Pending Approval")
-          ? { ...p, status: "Paid", proof_url: null, remaining: "PKR 0", raw_remaining: 0 }
+        p.id === targetPaymentId
+          ? { ...p, status: "Paid", proof_url: null }
           : p
-      )
-    );
-
-    setMembers((prev) =>
-      prev.map((m) =>
-        m.id === targetUserId ? { ...m, payment_status: "Paid", status: "Active" } : m
       )
     );
 
@@ -274,37 +307,127 @@ export default function PaymentsAdminPage() {
           }
         }
 
-        // Update ONLY this single targeted payment record
-        if (targetPaymentId) {
+        if (isAddonPayment) {
+          // 1. Approve Add-on payment in addon_payments table ONLY
           await supabase
-            .from("payments")
+            .from("addon_payments")
             .update({ status: "Paid", proof_url: null })
             .eq("id", targetPaymentId);
-        } else {
-          // Fallback: update only pending payments for this user
-          await supabase
-            .from("payments")
-            .update({ status: "Paid", proof_url: null })
-            .eq("user_id", targetUserId)
-            .eq("status", "Pending Approval");
-        }
 
-        if (targetUserId) {
+          // 2. Fetch existing member_addons & profile to check unexpired remaining days
+          const { data: existingMemberAddon } = await supabase
+            .from("member_addons")
+            .select("start_date, expiry_date, days_remaining")
+            .eq("user_id", targetUserId)
+            .maybeSingle();
+
           const { data: userProf } = await supabase
             .from("profiles")
-            .select("upcoming_plan, next_plan")
+            .select("active_addons")
             .eq("id", targetUserId)
             .maybeSingle();
 
-          const profileUpdates = { status: "Active" };
-          if (userProf?.upcoming_plan || userProf?.next_plan) {
-            profileUpdates.plan = userProf.upcoming_plan || userProf.next_plan;
-            profileUpdates.upcoming_plan = null;
-            profileUpdates.next_plan = null;
+          let existingAddons = Array.isArray(userProf?.active_addons) ? [...userProf.active_addons] : [];
+          const cardioIdx = existingAddons.findIndex((a) => a.name?.toLowerCase().includes("cardio") || a.id === "addon-1" || a.addon_id === "addon-1");
+          const existingAddonObj = cardioIdx >= 0 ? existingAddons[cardioIdx] : null;
+
+          const currentExpiryStr = existingMemberAddon?.expiry_date || existingAddonObj?.expiry_date;
+          const currentExpiry = currentExpiryStr ? new Date(currentExpiryStr) : null;
+          const isCurrentlyActive = currentExpiry && currentExpiry.getTime() > Date.now();
+
+          // If current cycle still has days remaining (e.g. 5 days), stack +30 days on top of existing expiry (5 + 30 = 35 days)
+          const baseTime = isCurrentlyActive ? currentExpiry.getTime() : Date.now();
+          const newExpiryDate = new Date(baseTime + 30 * 86400000);
+          const newExpiry = newExpiryDate.toISOString();
+          const totalDaysRemaining = Math.max(1, Math.ceil((newExpiryDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24)));
+          const originalStartDate = existingMemberAddon?.start_date || existingAddonObj?.start_date || new Date().toISOString();
+
+          try {
+            await supabase
+              .from("member_addons")
+              .update({
+                start_date: originalStartDate,
+                expiry_date: newExpiry,
+                days_remaining: totalDaysRemaining,
+                status: "Active",
+                updated_at: new Date().toISOString(),
+              })
+              .eq("user_id", targetUserId);
+          } catch (e) {}
+
+          const updatedAddonRecord = {
+            id: existingAddonObj?.id || "addon-1",
+            addon_id: existingAddonObj?.addon_id || "addon-1",
+            name: existingAddonObj?.name || "Cardio Access Plan",
+            price: existingAddonObj?.price || 1500,
+            icon: existingAddonObj?.icon || "🏃",
+            start_date: originalStartDate,
+            expiry_date: newExpiry,
+            days_remaining: totalDaysRemaining,
+            status: "Active",
+          };
+
+          if (cardioIdx >= 0) {
+            existingAddons[cardioIdx] = updatedAddonRecord;
+          } else {
+            existingAddons.push(updatedAddonRecord);
+          }
+          await supabase.from("profiles").update({ active_addons: existingAddons }).eq("id", targetUserId);
+
+          try {
+            await supabase.from("notifications").insert([
+              {
+                user_id: targetUserId,
+                title: "Cardio Pass Renewed! 🏃",
+                message: `Your Cardio Access payment was verified! +30 days added on top of remaining days. Total: ${totalDaysRemaining} days active!`,
+                type: "payment_approved",
+                action: "VIEW_PAYMENT",
+                created_at: new Date().toISOString(),
+              },
+            ]);
+          } catch (notifErr) {}
+        } else {
+          // 2. Approve Monthly Gym Plan payment in payments table
+          if (targetPaymentId) {
+            await supabase
+              .from("payments")
+              .update({ status: "Paid", proof_url: null })
+              .eq("id", targetPaymentId);
           }
 
-          await supabase.from("profiles").update(profileUpdates).eq("id", targetUserId);
+          if (targetUserId) {
+            const { data: userProf } = await supabase
+              .from("profiles")
+              .select("upcoming_plan, next_plan, plan, full_name")
+              .eq("id", targetUserId)
+              .maybeSingle();
+
+            const profileUpdates = { status: "Active" };
+            let finalPlan = (userProf?.plan || "Pro Membership").split(" [Add-ons:")[0];
+            if (userProf?.upcoming_plan || userProf?.next_plan) {
+              finalPlan = (userProf.upcoming_plan || userProf.next_plan).split(" [Add-ons:")[0];
+              profileUpdates.plan = finalPlan;
+              profileUpdates.upcoming_plan = null;
+              profileUpdates.next_plan = null;
+            }
+
+            await supabase.from("profiles").update(profileUpdates).eq("id", targetUserId);
+
+            try {
+              await supabase.from("notifications").insert([
+                {
+                  user_id: targetUserId,
+                  title: "Monthly Pass Approved! 🎉",
+                  message: `Your renewal payment has been verified and approved by admin. 30 days added to your ${finalPlan} pass!`,
+                  type: "payment_approved",
+                  action: "VIEW_PAYMENT",
+                  created_at: new Date().toISOString(),
+                },
+              ]);
+            } catch (notifErr) {}
+          }
         }
+
         await fetchPaymentsAndMembers();
       } catch (err) {
         console.error("Supabase approve error:", err);
@@ -367,6 +490,24 @@ export default function PaymentsAdminPage() {
             .update({ status: "Rejected", proof_url: null })
             .eq("user_id", targetUserId)
             .eq("status", "Pending Approval");
+        }
+
+        // Insert notification for member about rejection
+        if (targetUserId) {
+          try {
+            await supabase.from("notifications").insert([
+              {
+                user_id: targetUserId,
+                title: "Payment Proof Rejected ❌",
+                message: "Your payment transfer proof was rejected by admin. Please submit a valid receipt in the Payments tab.",
+                type: "expired",
+                action: "PAY_FEE",
+                created_at: new Date().toISOString(),
+              },
+            ]);
+          } catch (notifErr) {
+            console.warn("Notice creating rejection notification:", notifErr);
+          }
         }
 
         await fetchPaymentsAndMembers();
@@ -454,6 +595,8 @@ export default function PaymentsAdminPage() {
             total_fee: actualTotalFee,
             status: finalStatus,
             payment_method: effectiveMethod,
+            payment_type: "membership",
+            item_name: targetPlan,
             invoice_id: isWalkInPayment ? `INV-WALK-${Math.floor(1000 + Math.random() * 9000)}` : invId,
             date: new Date().toISOString(),
           },
@@ -543,48 +686,53 @@ export default function PaymentsAdminPage() {
 
   const getMemberPaymentInfo = (memberId) => {
     const member = members.find((m) => m.id === memberId);
-    const mPlanName = member?.plan || "Standard Membership";
+    const cleanPlan = (member?.plan || "Standard Membership").split(" [Add-ons:")[0];
     
-    let fee = (member?.fee_paid && Number(member.fee_paid) > 0)
+    let basePlanFee = (member?.fee_paid && Number(member.fee_paid) > 0)
       ? Number(member.fee_paid)
       : (member?.total_fee && Number(member.total_fee) > 0)
       ? Number(member.total_fee)
-      : resolveBasePlanFee(mPlanName);
+      : resolveBasePlanFee(cleanPlan);
 
     const userPayments = payments.filter((p) => p.user_id === memberId);
-    const paidPayments = userPayments.filter((p) => p.status === "Paid");
-    const sumPaid = paidPayments.reduce((acc, p) => acc + (p.raw_amount || 0), 0);
+    const gymPayments = userPayments.filter((p) => !p.is_addon);
+    const addonPayments = userPayments.filter((p) => p.is_addon);
 
-    const pendingPay = userPayments.find((p) => p.status === "Pending Approval" || p.proof_url);
-    const hasRejectedOnly = userPayments.length > 0 && userPayments.every((p) => p.status === "Rejected");
+    const paidGymPayments = gymPayments.filter((p) => p.status === "Paid");
+    const sumPaidGym = paidGymPayments.reduce((acc, p) => acc + (p.raw_amount || 0), 0);
+
+    const pendingGymPay = gymPayments.find((p) => p.status === "Pending Approval" || p.proof_url);
+    const pendingAddonPay = addonPayments.find((p) => p.status === "Pending Approval" || p.proof_url);
+
+    const isPendingAddon = !pendingGymPay && !!pendingAddonPay;
+    const activePending = pendingGymPay || pendingAddonPay;
 
     const isExpired =
       member?.status === "Expired" ||
       (member?.days_remaining !== undefined && member?.days_remaining !== null && Number(member.days_remaining) <= 0);
 
     let st = "Unpaid";
-    if (pendingPay) {
+    if (activePending) {
       st = "Pending Approval";
     } else if (isExpired) {
       st = "Unpaid";
-    } else if (hasRejectedOnly) {
-      st = "Rejected";
-    } else if (paidPayments.length > 0 || sumPaid > 0) {
-      st = "Paid";
-    } else if (member?.status === "Active") {
+    } else if (paidGymPayments.length > 0 || member?.status === "Active") {
       st = "Paid";
     }
 
-    const proofUrl = pendingPay?.proof_url || userPayments.find((p) => p.proof_url)?.proof_url || member?.proof_url || null;
+    const proofUrl = activePending?.proof_url || userPayments.find((p) => p.proof_url)?.proof_url || member?.proof_url || null;
 
     return {
       status: st,
-      paid: st === "Paid" ? (sumPaid > 0 ? sumPaid : fee) : 0,
-      total_fee: fee,
+      paid: sumPaidGym > 0 ? sumPaidGym : (st === "Paid" ? basePlanFee : 0),
+      total_fee: isPendingAddon ? (pendingAddonPay?.raw_amount || 1500) : basePlanFee,
+      base_plan_fee: basePlanFee,
+      pending_item_name: isPendingAddon ? (pendingAddonPay?.plan || "Cardio Access Pass (Add-on)") : cleanPlan,
+      is_pending_addon: isPendingAddon,
       proof_url: proofUrl,
-      payment_id: pendingPay?.id || paidPayments[0]?.id || userPayments[0]?.id || null,
-      method: pendingPay?.method || paidPayments[0]?.method || userPayments[0]?.method || "Cash / Desk",
-      invoice_id: pendingPay?.invoice_id || paidPayments[0]?.invoice_id || userPayments[0]?.invoice_id || "INV-MEM",
+      payment_id: activePending?.id || paidGymPayments[0]?.id || userPayments[0]?.id || null,
+      method: activePending?.method || paidGymPayments[0]?.method || userPayments[0]?.method || "Cash / Desk",
+      invoice_id: activePending?.invoice_id || paidGymPayments[0]?.invoice_id || userPayments[0]?.invoice_id || "INV-MEM",
       is_expired: isExpired,
     };
   };
@@ -909,9 +1057,22 @@ export default function PaymentsAdminPage() {
                         </td>
 
                         <td className="py-3.5 px-4 text-slate-600 font-medium">
-                          <p className="text-xs font-semibold text-slate-800">{m.plan || "Standard Membership"}</p>
-                          <p className="text-[10px] text-slate-400 font-mono">
+                          <p className="text-xs font-semibold text-slate-800">
+                            {info.is_pending_addon ? (
+                              <span className="inline-flex items-center gap-1 text-indigo-700 font-bold">
+                                🏃 {info.pending_item_name}
+                              </span>
+                            ) : (
+                              m.plan || "Standard Membership"
+                            )}
+                          </p>
+                          <p className="text-[10px] text-slate-500 font-mono font-bold">
                             PKR {Number(info.total_fee).toLocaleString()}
+                            {info.is_pending_addon && (
+                              <span className="text-slate-400 font-normal ml-1.5">
+                                (Main Pass: PKR {Number(info.base_plan_fee).toLocaleString()} • Paid)
+                              </span>
+                            )}
                           </p>
                         </td>
 
@@ -1249,9 +1410,19 @@ export default function PaymentsAdminPage() {
               ✕
             </button>
 
-            <div className="border-b border-slate-100 pb-2">
-              <h3 className="text-base font-extrabold text-slate-900">App Screenshot Review</h3>
-              <p className="text-xs text-slate-500">Submitted by {activeProof.member.full_name}</p>
+            <div className="border-b border-slate-100 pb-2 flex justify-between items-start">
+              <div>
+                <h3 className="text-base font-extrabold text-slate-900">App Screenshot Review</h3>
+                <p className="text-xs text-slate-500">Submitted by {activeProof.member.full_name}</p>
+              </div>
+              <div className="text-right">
+                <span className="inline-block px-2.5 py-1 bg-indigo-50 border border-indigo-200 text-indigo-700 text-xs font-bold rounded-lg font-mono">
+                  PKR {Number(activeProof.info?.total_fee || activeProof.info?.paid || 0).toLocaleString()}
+                </span>
+                <p className="text-[10px] text-slate-500 font-semibold mt-0.5">
+                  {activeProof.info?.pending_item_name || activeProof.info?.plan || "Membership Fee"}
+                </p>
+              </div>
             </div>
 
             <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-2 max-h-72 overflow-hidden flex items-center justify-center">
@@ -1276,16 +1447,16 @@ export default function PaymentsAdminPage() {
               <button
                 type="button"
                 onClick={() => handleRejectPayment(activeProof.member, activeProof.info?.proof_url, activeProof.info?.payment_id)}
-                className="bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs px-3.5 py-2 rounded-xl border border-rose-200 transition-all"
+                className="bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs px-3.5 py-2 rounded-xl border border-rose-200 transition-all cursor-pointer"
               >
                 Reject Proof
               </button>
               <button
                 type="button"
                 onClick={() => handleApprovePayment(activeProof.member, activeProof.info?.proof_url, activeProof.info?.payment_id)}
-                className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-4 py-2 rounded-xl transition-all shadow-xs"
+                className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-4 py-2 rounded-xl transition-all shadow-xs cursor-pointer"
               >
-                Approve Transfer
+                Approve {activeProof.info?.is_pending_addon ? "Add-on" : "Transfer"} (PKR {Number(activeProof.info?.total_fee || 0).toLocaleString()})
               </button>
             </div>
           </div>

@@ -565,17 +565,48 @@ export default function MembersPage() {
     }
 
     let finalPlanLabel = editPlan;
-    const selectedAddonObjs = availableAddons.filter((a) => editAddonIds.includes(a.id));
-    if (selectedAddonObjs.length > 0) {
-      const addonTitles = selectedAddonObjs.map(
-        (a) => `${a.name} (+PKR ${Number(a.price).toLocaleString()})`
-      );
-      finalPlanLabel = `${editPlan} [Add-ons: ${addonTitles.join(" + ")}]`;
+    // Strip any old embedded [Add-ons: ...] or [Next: ...] brackets from base plan name
+    if (finalPlanLabel.includes(" [Add-ons:")) {
+      finalPlanLabel = finalPlanLabel.split(" [Add-ons:")[0];
+    }
+    if (finalPlanLabel.includes(" [Next:")) {
+      finalPlanLabel = finalPlanLabel.split(" [Next:")[0];
     }
 
     try {
       const dbStatus = (editStatus === "Inactive" || editStatus === "Deactivated") ? "Suspended" : editStatus;
       const numericFee = parseFloat(String(editTotalFee).replace(/,/g, "")) || resolveMemberFee(editingMember);
+
+      // Selected Add-ons
+      const selectedAddonObjs = (availableAddons || []).filter((a) => editAddonIds.includes(a.id));
+
+      // Build active_addons with independent 30-day lifecycles
+      const existingAddons = Array.isArray(editingMember.active_addons) ? editingMember.active_addons : [];
+      const updatedActiveAddons = selectedAddonObjs.map((addon) => {
+        const foundExisting = existingAddons.find((a) => a.id === addon.id || a.addon_id === addon.id || a.name === addon.name);
+        if (foundExisting && foundExisting.expiry_date && new Date(foundExisting.expiry_date) > new Date()) {
+          const diffMs = new Date(foundExisting.expiry_date).getTime() - Date.now();
+          const remDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+          return {
+            ...foundExisting,
+            days_remaining: Math.max(0, remDays),
+            status: remDays > 0 ? "Active" : "Expired",
+          };
+        }
+        // Newly added Add-on gets a full independent 30-day limit
+        return {
+          id: addon.id,
+          addon_id: addon.id,
+          name: addon.name,
+          price: addon.price,
+          icon: addon.icon || "🏃",
+          start_date: new Date().toISOString(),
+          expiry_date: new Date(Date.now() + 30 * 86400000).toISOString(),
+          days_remaining: 30,
+          status: "Active",
+        };
+      });
+
       const safeFullUpdates = {
         full_name: editFullName.trim() || editingMember.full_name,
         email: editEmail.trim() || editingMember.email,
@@ -584,6 +615,7 @@ export default function MembersPage() {
         status: dbStatus,
         plan: finalPlanLabel,
         days_remaining: Number(editDaysRemaining) || 30,
+        active_addons: updatedActiveAddons,
         updated_at: new Date().toISOString(),
       };
       if (editMemberId.trim()) safeFullUpdates.member_id = editMemberId.trim();
@@ -619,6 +651,72 @@ export default function MembersPage() {
               updated_at: new Date().toISOString(),
             })
             .eq("id", editingMember.id);
+        }
+
+        // Sync dedicated member_addons table in Supabase
+        try {
+          const currentAddonIds = selectedAddonObjs.map((a) => a.id);
+          const { data: dbExisting } = await supabase
+            .from("member_addons")
+            .select("id, addon_id")
+            .eq("user_id", editingMember.id);
+
+          if (dbExisting) {
+            for (const item of dbExisting) {
+              if (!currentAddonIds.includes(item.addon_id)) {
+                await supabase
+                  .from("member_addons")
+                  .update({ status: "Cancelled", updated_at: new Date().toISOString() })
+                  .eq("id", item.id);
+              }
+            }
+          }
+
+          for (const addon of updatedActiveAddons) {
+            const { error: insErr } = await supabase.from("member_addons").insert([
+              {
+                user_id: editingMember.id,
+                addon_id: addon.id,
+                name: addon.name,
+                price: addon.price,
+                icon: addon.icon || "🏃",
+                start_date: addon.start_date,
+                expiry_date: addon.expiry_date,
+                days_remaining: addon.days_remaining,
+                status: addon.status || "Active",
+              },
+            ]);
+            if (insErr) {
+              await supabase
+                .from("member_addons")
+                .update({
+                  expiry_date: addon.expiry_date,
+                  days_remaining: addon.days_remaining,
+                  status: addon.status || "Active",
+                  updated_at: new Date().toISOString(),
+                })
+                .eq("user_id", editingMember.id)
+                .eq("addon_id", addon.id);
+            }
+          }
+        } catch (addonSyncErr) {
+          console.warn("Notice syncing member_addons table:", addonSyncErr);
+        }
+
+        // Insert notification for member
+        try {
+          await supabase.from("notifications").insert([
+            {
+              user_id: editingMember.id,
+              title: "Membership Profile Updated 📋",
+              message: `Your membership profile was updated by admin. Plan: ${finalPlanLabel}, Status: ${dbStatus}.`,
+              type: "profile_updated",
+              action: "VIEW_PROFILE",
+              created_at: new Date().toISOString(),
+            },
+          ]);
+        } catch (notifErr) {
+          console.warn("Notice creating profile update notification:", notifErr);
         }
       }
 

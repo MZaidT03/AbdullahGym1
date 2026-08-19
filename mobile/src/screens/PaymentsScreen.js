@@ -4,7 +4,6 @@ import {
   Text,
   StyleSheet,
   ScrollView,
-  SafeAreaView,
   StatusBar,
   TouchableOpacity,
   Modal,
@@ -14,10 +13,12 @@ import {
   RefreshControl,
   Clipboard,
   Platform,
+  KeyboardAvoidingView,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { useAuth, resolvePlanFee } from '../context/AuthContext';
+import { useAuth, resolvePlanFee, cleanPlanName } from '../context/AuthContext';
 import { useDialog } from '../context/DialogContext';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import GymHeader from '../components/GymHeader';
@@ -50,10 +51,16 @@ const decodeBase64ToArrayBuffer = (base64) => {
 };
 
 export const PaymentsScreen = () => {
-  const { user, refreshProfile } = useAuth();
+  const { user, refreshProfile, removeMemberAddon } = useAuth();
   const { showDialog } = useDialog();
 
-  const memberFee = user?.monthlyFee || resolvePlanFee(user?.plan) || 5000;
+  const baseMembershipFee = user?.monthlyFee || resolvePlanFee(user?.plan) || 5000;
+  const activeAddonsList = user?.activeAddons || [];
+  const primaryAddon = activeAddonsList.length > 0 ? activeAddonsList[0] : { id: 'addon-1', addonId: 'addon-1', name: 'Cardio Access Plan', price: 1500, icon: '🏃' };
+  const addonFee = Number(primaryAddon.price) || 1500;
+  const totalAddonsFee = activeAddonsList.length > 0 ? activeAddonsList.reduce((sum, a) => sum + (Number(a.price) || 0), 0) : addonFee;
+  const combinedFee = baseMembershipFee + totalAddonsFee;
+  const memberFee = baseMembershipFee;
 
   const [payments, setPayments] = useState([]);
   const [paymentAccounts, setPaymentAccounts] = useState([]);
@@ -63,7 +70,8 @@ export const PaymentsScreen = () => {
 
   // Form states
   const [selectedAccIndex, setSelectedAccIndex] = useState(0);
-  const [amount, setAmount] = useState(String(memberFee));
+  const [paymentOption, setPaymentOption] = useState('membership'); // 'membership' | 'addon' | 'bundle'
+  const [amount, setAmount] = useState(String(baseMembershipFee));
   const [transactionNote, setTransactionNote] = useState('');
   const [screenshotUri, setScreenshotUri] = useState(null);
   const [submitting, setSubmitting] = useState(false);
@@ -75,11 +83,14 @@ export const PaymentsScreen = () => {
   }, [user?.id]);
 
   useEffect(() => {
-    if (user?.monthlyFee || user?.plan) {
-      const fee = user?.monthlyFee || resolvePlanFee(user?.plan) || 5000;
-      setAmount(String(fee));
+    if (paymentOption === 'addon') {
+      setAmount(String(addonFee));
+    } else if (paymentOption === 'bundle') {
+      setAmount(String(combinedFee));
+    } else {
+      setAmount(String(baseMembershipFee));
     }
-  }, [user?.monthlyFee, user?.plan]);
+  }, [paymentOption, baseMembershipFee, addonFee, combinedFee]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -93,21 +104,42 @@ export const PaymentsScreen = () => {
     setLoading(true);
     if (isSupabaseConfigured() && user?.id) {
       try {
-        const { data, error } = await supabase
+        const { data: gymPayData } = await supabase
           .from('payments')
           .select('*')
           .eq('user_id', user.id)
           .order('date', { ascending: false });
 
-        if (error) {
-          console.warn('Error fetching payments:', error.message);
-          setPayments(getFallbackPayments());
-        } else {
-          const list = data && data.length > 0 ? data : getFallbackPayments();
-          setPayments(list);
-          if (data && data.length > 0) {
-            NotificationService.evaluatePaymentApprovedNotification(data, user).catch(() => {});
-          }
+        let addonPayData = [];
+        try {
+          const { data: aData } = await supabase
+            .from('addon_payments')
+            .select('*')
+            .eq('user_id', user.id)
+            .order('date', { ascending: false });
+          if (aData) addonPayData = aData;
+        } catch (e) {}
+
+        const normalizedGym = (gymPayData || []).map((p) => ({
+          ...p,
+          isAddon: false,
+          displayTitle: `${cleanPlanName(user?.plan || 'Pro Membership')}`,
+        }));
+
+        const normalizedAddon = (addonPayData || []).map((p) => ({
+          ...p,
+          isAddon: true,
+          displayTitle: `${p.addon_name || 'Cardio Pass'} (Add-on)`,
+        }));
+
+        const combinedList = [...normalizedGym, ...normalizedAddon].sort(
+          (a, b) => new Date(b.date || 0) - new Date(a.date || 0)
+        );
+
+        setPayments(combinedList.length > 0 ? combinedList : getFallbackPayments());
+
+        if (gymPayData && gymPayData.length > 0) {
+          NotificationService.evaluatePaymentApprovedNotification(gymPayData, user).catch(() => {});
         }
       } catch (err) {
         console.error('Payments fetch error:', err);
@@ -258,13 +290,11 @@ export const PaymentsScreen = () => {
 
   const daysRemaining = user?.daysRemaining ?? 30;
   const overdueDays = user?.overdueDays ?? 0;
-  const isGracePeriod = overdueDays > 0 && overdueDays <= 7;
-  const isExpired = overdueDays > 7 || user?.status === 'Expired' || user?.status === 'Deactivated';
+  const isExpired = daysRemaining <= 0 || user?.status === 'Expired' || user?.status === 'Deactivated' || user?.status === 'Suspended';
 
-  // Payment window rule:
-  // "any member can pay their fee in last 10 days when their membership expires to 7 day grace period"
+  // Payment window rule: member can pay in the last 10 days of their month or when expired
   const isRenewalWindowOpen = daysRemaining <= 10 && daysRemaining > 0;
-  const isEligibleToPay = isRenewalWindowOpen || isGracePeriod || isExpired || !latestPaidPayment;
+  const isEligibleToPay = isRenewalWindowOpen || isExpired || !latestPaidPayment;
 
   // Calculate Expiry Date & Renewal Open Date strings with stacked consecutive cycles
   let expiryDateObj = null;
@@ -314,8 +344,6 @@ export const PaymentsScreen = () => {
     planStatus = 'Pending Approval';
   } else if (isExpired) {
     planStatus = 'Expired';
-  } else if (isGracePeriod) {
-    planStatus = `Grace Period (Day ${overdueDays}/7)`;
   } else if (isRenewalWindowOpen) {
     planStatus = `Renewal Open (${daysRemaining}d Left)`;
   } else {
@@ -404,36 +432,68 @@ export const PaymentsScreen = () => {
       }
 
       const generatedInvoice = `INV-${currentYear}-${Math.floor(1000 + Math.random() * 9000)}`;
-      const payload = {
-        user_id: user?.id || 'demo-user-id',
-        amount: numAmt,
-        status: 'Pending Approval',
-        payment_method: `${activeAccount.provider} Transfer`,
-        invoice_id: generatedInvoice,
-        date: new Date().toISOString(),
-        total_fee: numAmt,
-      };
-
-      if (uploadedPublicUrl) {
-        payload.proof_url = uploadedPublicUrl;
-      }
 
       if (isSupabaseConfigured() && user?.id) {
-        const { error } = await supabase.from('payments').insert([payload]);
-
-        if (error && (error.code === 'PGRST204' || error.message.includes('proof_url') || error.message.includes('total_fee'))) {
-          const safePayload = {
-            user_id: user?.id || 'demo-user-id',
-            amount: numAmt,
+        if (paymentOption === 'membership') {
+          // 1. Gym Plan Payment (into payments table)
+          const gymPayload = {
+            user_id: user.id,
+            amount: baseMembershipFee,
+            total_fee: baseMembershipFee,
             status: 'Pending Approval',
             payment_method: `${activeAccount.provider} Transfer`,
+            payment_type: 'membership',
+            item_name: cleanPlanName(user?.plan || 'Pro Membership'),
             invoice_id: generatedInvoice,
             date: new Date().toISOString(),
           };
-          const { error: fallbackErr } = await supabase.from('payments').insert([safePayload]);
-          if (fallbackErr) throw fallbackErr;
-        } else if (error) {
-          throw error;
+          if (uploadedPublicUrl) gymPayload.proof_url = uploadedPublicUrl;
+          await supabase.from('payments').insert([gymPayload]);
+        } else if (paymentOption === 'addon') {
+          // 2. Add-on Payment ONLY (into addon_payments table, NEVER payments table!)
+          const addonPayload = {
+            user_id: user.id,
+            addon_id: primaryAddon.addonId || primaryAddon.id || 'addon-1',
+            addon_name: primaryAddon.name || 'Cardio Access Plan',
+            amount: addonFee,
+            status: 'Pending Approval',
+            payment_method: `${activeAccount.provider} Transfer`,
+            invoice_id: `INV-ADD-${currentYear}-${Math.floor(1000 + Math.random() * 9000)}`,
+            date: new Date().toISOString(),
+          };
+          if (uploadedPublicUrl) addonPayload.proof_url = uploadedPublicUrl;
+          await supabase.from('addon_payments').insert([addonPayload]);
+        } else if (paymentOption === 'bundle') {
+          // 3. Both Combined: 1 Gym payment + 1 Addon payment
+          const gymPayload = {
+            user_id: user.id,
+            amount: baseMembershipFee,
+            total_fee: baseMembershipFee,
+            status: 'Pending Approval',
+            payment_method: `${activeAccount.provider} Transfer`,
+            payment_type: 'membership',
+            item_name: cleanPlanName(user?.plan || 'Pro Membership'),
+            invoice_id: generatedInvoice,
+            date: new Date().toISOString(),
+          };
+          if (uploadedPublicUrl) gymPayload.proof_url = uploadedPublicUrl;
+
+          const addonPayload = {
+            user_id: user.id,
+            addon_id: primaryAddon.addonId || primaryAddon.id || 'addon-1',
+            addon_name: primaryAddon.name || 'Cardio Access Plan',
+            amount: addonFee,
+            status: 'Pending Approval',
+            payment_method: `${activeAccount.provider} Transfer`,
+            invoice_id: `INV-ADD-${currentYear}-${Math.floor(1000 + Math.random() * 9000)}`,
+            date: new Date().toISOString(),
+          };
+          if (uploadedPublicUrl) addonPayload.proof_url = uploadedPublicUrl;
+
+          await Promise.all([
+            supabase.from('payments').insert([gymPayload]),
+            supabase.from('addon_payments').insert([addonPayload]),
+          ]);
         }
       }
 
@@ -444,7 +504,7 @@ export const PaymentsScreen = () => {
 
       showDialog({
         title: 'Payment Proof Submitted! 🚀',
-        message: `Thank you! Your ${activeAccount.provider} transfer proof has been submitted. The admin will verify and approve your membership renewal shortly.`,
+        message: `Thank you! Your ${activeAccount.provider} transfer proof has been submitted. The admin will verify and approve your pass shortly.`,
         type: 'success',
       });
 
@@ -461,6 +521,27 @@ export const PaymentsScreen = () => {
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const handleRemoveAddon = (addonId) => {
+    showDialog({
+      type: 'confirm',
+      title: 'Remove Add-on Pass?',
+      message: 'Are you sure you want to remove this add-on? It will be removed from your membership and no additional fee will be required.',
+      onConfirm: async () => {
+        if (removeMemberAddon) {
+          const res = await removeMemberAddon(addonId);
+          if (res?.success) {
+            showDialog({
+              type: 'success',
+              title: 'Add-on Removed',
+              message: 'The add-on has been removed from your membership.',
+            });
+            await fetchPayments();
+          }
+        }
+      },
+    });
   };
 
   const handlePayPress = () => {
@@ -507,19 +588,102 @@ export const PaymentsScreen = () => {
         {/* Active Subscription Billing Pass */}
         <PaymentCard
           isCurrent={true}
-          title={user?.plan || 'Pro Membership'}
-          amount={`PKR ${memberFee.toLocaleString()}`}
+          title={cleanPlanName(user?.plan || 'Pro Membership')}
+          amount={`PKR ${baseMembershipFee.toLocaleString()}`}
           status={planStatus}
           nextDate={
             hasPendingProof
               ? 'Under Review'
-              : !isEligibleToPay
-              ? expiryDateStr
-              : isGracePeriod
-              ? `Grace Expiry: Day ${overdueDays}/7`
+              : isExpired
+              ? 'Expired (Renewal Due)'
               : expiryDateStr
           }
         />
+
+        {/* Active Add-On Passes (with independent 30-day lifecycles) */}
+        {user?.activeAddons && user.activeAddons.length > 0 ? (
+          <View style={styles.addonPassesSection}>
+            <View style={styles.addonPassesHeaderRow}>
+              <Text style={styles.addonPassesHeader}>ACTIVE ADD-ON PASSES</Text>
+              <Text style={styles.addonPassesSub}>Independent 30-Day Validity</Text>
+            </View>
+            {user.activeAddons.map((addon) => {
+              const isAddonExpired = addon.daysRemaining <= 0;
+              return (
+                <View key={addon.id} style={[styles.addonPassCard, isAddonExpired && styles.addonCardExpiredBorder]}>
+                  <View style={styles.addonPassTop}>
+                    <View style={styles.addonPassLeft}>
+                      <View style={[styles.addonPassIconCircle, isAddonExpired && styles.addonIconCircleExpired]}>
+                        <Text style={styles.addonPassIcon}>{addon.icon || '🏃'}</Text>
+                      </View>
+                      <View>
+                        <Text style={styles.addonPassName}>{addon.name}</Text>
+                        <Text style={styles.addonPassPrice}>PKR {Number(addon.price).toLocaleString()} / 30 days</Text>
+                      </View>
+                    </View>
+                    <View style={styles.addonPassRight}>
+                      <View
+                        style={[
+                          styles.addonPassBadge,
+                          !isAddonExpired ? styles.badgeActive : styles.badgeExpired,
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.addonPassBadgeText,
+                            !isAddonExpired ? styles.textActive : styles.textExpired,
+                          ]}
+                        >
+                          {!isAddonExpired ? `${addon.daysRemaining}d Left` : 'Expired'}
+                        </Text>
+                      </View>
+                      <Text style={styles.addonPassExpiry}>
+                        {addon.expiryDate
+                          ? `Exp: ${new Date(addon.expiryDate).toLocaleDateString([], { month: 'short', day: 'numeric' })}`
+                          : '30 days cycle'}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* Expired Add-on Notice & Actions */}
+                  {isAddonExpired ? (
+                    <View style={styles.addonExpiredAlertBox}>
+                      <View style={styles.addonExpiredNoticeRow}>
+                        <Ionicons name="alert-circle-outline" size={16} color="#DC2626" />
+                        <Text style={styles.addonExpiredNoticeText}>
+                          Cardio add-on pass expired. Pay fee to renew or remove this add-on.
+                        </Text>
+                      </View>
+                      <View style={styles.addonActionBtnsRow}>
+                        <TouchableOpacity
+                          style={styles.addonPayBtn}
+                          onPress={() => {
+                            setPaymentOption('addon');
+                            setAmount(String(addon.price || 1500));
+                            setModalVisible(true);
+                          }}
+                          activeOpacity={0.8}
+                        >
+                          <Ionicons name="card-outline" size={13} color={colors.white} />
+                          <Text style={styles.addonPayBtnText}>Pay PKR {Number(addon.price).toLocaleString()}</Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          style={styles.addonRemoveBtn}
+                          onPress={() => handleRemoveAddon(addon.id || addon.addonId)}
+                          activeOpacity={0.8}
+                        >
+                          <Ionicons name="trash-outline" size={13} color="#DC2626" />
+                          <Text style={styles.addonRemoveBtnText}>Remove Add-on</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  ) : null}
+                </View>
+              );
+            })}
+          </View>
+        ) : null}
 
         {/* Scheduled Upcoming Plan Banner (if any) */}
         {user?.upcomingPlan ? (
@@ -547,11 +711,11 @@ export const PaymentsScreen = () => {
               Proof Submitted: Awaiting admin approval to extend your membership pass.
             </Text>
           </View>
-        ) : isGracePeriod ? (
-          <View style={styles.gracePeriodBanner}>
-            <Ionicons name="warning-outline" size={16} color="#C2410C" />
-            <Text style={styles.gracePeriodText}>
-              ⚠️ 7-Day Grace Period (Day {overdueDays} of 7): Please pay your monthly fee before day 7 to prevent account expiration.
+        ) : isExpired ? (
+          <View style={styles.expiredBanner}>
+            <Ionicons name="lock-closed-outline" size={16} color="#DC2626" />
+            <Text style={styles.expiredBannerText}>
+              🔒 Membership Expired: Your monthly validity has ended. Submit transfer proof now to reactivate your gym access.
             </Text>
           </View>
         ) : isRenewalWindowOpen ? (
@@ -576,7 +740,6 @@ export const PaymentsScreen = () => {
             styles.mainPayBtn,
             hasPendingProof && styles.pendingMainBtn,
             !isEligibleToPay && !hasPendingProof && styles.activeMainBtn,
-            isGracePeriod && !hasPendingProof && styles.graceMainBtn,
             isExpired && !hasPendingProof && styles.expiredMainBtn,
           ]}
           onPress={handlePayPress}
@@ -588,8 +751,6 @@ export const PaymentsScreen = () => {
                 ? 'time'
                 : !isEligibleToPay
                 ? 'shield-checkmark'
-                : isGracePeriod
-                ? 'alert-circle'
                 : isExpired
                 ? 'lock-closed'
                 : 'card'
@@ -602,10 +763,8 @@ export const PaymentsScreen = () => {
               ? 'Transfer Proof Under Review ⏳'
               : !isEligibleToPay
               ? `Membership Active (${daysRemaining} Days Left) ✓`
-              : isGracePeriod
-              ? `Pay Overdue Fee (Grace Day ${overdueDays}/7)`
               : isExpired
-              ? `Pay Fee to Reactivate Account`
+              ? `Reactivate Membership (PKR ${memberFee.toLocaleString()})`
               : `Submit Renewal Proof (PKR ${memberFee.toLocaleString()})`}
           </Text>
         </TouchableOpacity>
@@ -634,7 +793,7 @@ export const PaymentsScreen = () => {
               <PaymentCard
                 key={p.id || String(idx)}
                 isCurrent={false}
-                title="Monthly Gym Fee"
+                title={p.displayTitle || (p.isAddon ? `${p.addon_name || 'Cardio Pass'} (Add-on)` : 'Monthly Gym Fee')}
                 amount={`PKR ${(p.total_fee || p.amount || 5000).toLocaleString()}`}
                 date={dateStr}
                 method={p.payment_method || 'Desk / Counter'}
@@ -653,7 +812,10 @@ export const PaymentsScreen = () => {
         transparent={true}
         onRequestClose={() => setModalVisible(false)}
       >
-        <View style={styles.modalOverlay}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.modalOverlay}
+        >
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <View>
@@ -665,7 +827,11 @@ export const PaymentsScreen = () => {
               </TouchableOpacity>
             </View>
 
-            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingVertical: 12 }}>
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={{ paddingVertical: 12 }}
+            >
               {/* Account Selection Carousel */}
               <Text style={styles.inputLabel}>Select Gym Account</Text>
               <View style={styles.accountSelectorRow}>
@@ -727,8 +893,60 @@ export const PaymentsScreen = () => {
                 ) : null}
               </View>
 
+              {/* Payment Type Selection (Membership / Cardio Addon / Both) */}
+              <Text style={styles.inputLabel}>What are you paying for?</Text>
+              <View style={styles.paymentTypeSelectorRow}>
+                <TouchableOpacity
+                  style={[
+                    styles.payTypeCard,
+                    paymentOption === 'membership' && styles.payTypeCardActive,
+                  ]}
+                  onPress={() => setPaymentOption('membership')}
+                  activeOpacity={0.8}
+                >
+                  <Text style={[styles.payTypeTitle, paymentOption === 'membership' && styles.payTypeTitleActive]}>
+                    🏋️ Gym Plan
+                  </Text>
+                  <Text style={[styles.payTypeFee, paymentOption === 'membership' && styles.payTypeFeeActive]}>
+                    PKR {baseMembershipFee.toLocaleString()}
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.payTypeCard,
+                    paymentOption === 'addon' && styles.payTypeCardActive,
+                  ]}
+                  onPress={() => setPaymentOption('addon')}
+                  activeOpacity={0.8}
+                >
+                  <Text style={[styles.payTypeTitle, paymentOption === 'addon' && styles.payTypeTitleActive]}>
+                    🏃 Cardio Pass
+                  </Text>
+                  <Text style={[styles.payTypeFee, paymentOption === 'addon' && styles.payTypeFeeActive]}>
+                    PKR {addonFee.toLocaleString()}
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.payTypeCard,
+                    paymentOption === 'bundle' && styles.payTypeCardActive,
+                  ]}
+                  onPress={() => setPaymentOption('bundle')}
+                  activeOpacity={0.8}
+                >
+                  <Text style={[styles.payTypeTitle, paymentOption === 'bundle' && styles.payTypeTitleActive]}>
+                    ✨ Both Combined
+                  </Text>
+                  <Text style={[styles.payTypeFee, paymentOption === 'bundle' && styles.payTypeFeeActive]}>
+                    PKR {combinedFee.toLocaleString()}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
               {/* Amount Input */}
-              <Text style={styles.inputLabel}>Amount (PKR)</Text>
+              <Text style={styles.inputLabel}>Amount to Transfer (PKR)</Text>
               <TextInput
                 style={styles.textInput}
                 value={amount}
@@ -802,7 +1020,7 @@ export const PaymentsScreen = () => {
               </TouchableOpacity>
             </ScrollView>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );
@@ -812,6 +1030,7 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: colors.background,
+    paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 28) + 4 : 0,
   },
   scrollContent: {
     paddingHorizontal: 16,
@@ -834,9 +1053,6 @@ const styles = StyleSheet.create({
   },
   pendingMainBtn: {
     backgroundColor: '#D97706',
-  },
-  graceMainBtn: {
-    backgroundColor: '#EA580C',
   },
   expiredMainBtn: {
     backgroundColor: '#DC2626',
@@ -865,21 +1081,21 @@ const styles = StyleSheet.create({
     flex: 1,
     lineHeight: 15,
   },
-  gracePeriodBanner: {
+  expiredBanner: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: '#FFEDD5',
+    backgroundColor: '#FEF2F2',
     borderWidth: 1,
-    borderColor: '#FED7AA',
+    borderColor: '#FECACA',
     borderRadius: 12,
     padding: 10,
     marginBottom: 12,
   },
-  gracePeriodText: {
+  expiredBannerText: {
     fontSize: 11,
     fontWeight: '700',
-    color: '#9A3412',
+    color: '#DC2626',
     flex: 1,
     lineHeight: 15,
   },
@@ -1216,6 +1432,210 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '800',
     color: colors.white,
+  },
+  addonPassesSection: {
+    marginBottom: 12,
+  },
+  addonPassesHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+    paddingHorizontal: 4,
+  },
+  addonPassesHeader: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: colors.textSecondary,
+    letterSpacing: 0.8,
+  },
+  addonPassesSub: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: colors.primaryDark,
+  },
+  addonPassCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    marginBottom: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  addonCardExpiredBorder: {
+    borderColor: '#FECACA',
+    backgroundColor: '#FFFBFB',
+  },
+  addonPassTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  addonPassLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  addonPassIconCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: '#F8FAFC',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  addonIconCircleExpired: {
+    backgroundColor: '#FEF2F2',
+    borderColor: '#FECACA',
+  },
+  addonPassIcon: {
+    fontSize: 18,
+  },
+  addonPassName: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.textPrimary,
+  },
+  addonPassPrice: {
+    fontSize: 11,
+    color: colors.textMuted,
+    marginTop: 1,
+  },
+  addonPassRight: {
+    alignItems: 'flex-end',
+  },
+  addonPassBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 8,
+    marginBottom: 2,
+  },
+  badgeActive: {
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1,
+    borderColor: '#DCFCE7',
+  },
+  badgeExpired: {
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+  },
+  addonPassBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  textActive: {
+    color: colors.primaryDark,
+  },
+  textExpired: {
+    color: '#DC2626',
+  },
+  addonPassExpiry: {
+    fontSize: 10,
+    color: colors.textMuted,
+    fontWeight: '600',
+  },
+  addonExpiredAlertBox: {
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#FEE2E2',
+  },
+  addonExpiredNoticeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 8,
+  },
+  addonExpiredNoticeText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#DC2626',
+    flex: 1,
+  },
+  addonActionBtnsRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  addonPayBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: colors.primary,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+  },
+  addonPayBtnText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: colors.white,
+  },
+  addonRemoveBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+  },
+  addonRemoveBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#DC2626',
+  },
+  paymentTypeSelectorRow: {
+    flexDirection: 'row',
+    gap: 6,
+    marginBottom: 12,
+  },
+  payTypeCard: {
+    flex: 1,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 6,
+    borderWidth: 1.5,
+    borderColor: '#E2E8F0',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  payTypeCardActive: {
+    backgroundColor: '#F0FDF4',
+    borderColor: colors.primary,
+  },
+  payTypeTitle: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.textPrimary,
+    textAlign: 'center',
+  },
+  payTypeTitleActive: {
+    color: colors.primaryDark,
+    fontWeight: '800',
+  },
+  payTypeFee: {
+    fontSize: 10,
+    color: colors.textMuted,
+    fontWeight: '600',
+    marginTop: 2,
+  },
+  payTypeFeeActive: {
+    color: colors.primaryDark,
+    fontWeight: '700',
   },
 });
 

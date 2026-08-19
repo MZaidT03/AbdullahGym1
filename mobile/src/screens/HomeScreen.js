@@ -4,10 +4,11 @@ import {
   Text,
   StyleSheet,
   ScrollView,
-  SafeAreaView,
   StatusBar,
   RefreshControl,
+  Platform,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
 import { useDialog } from '../context/DialogContext';
@@ -44,7 +45,7 @@ export const HomeScreen = ({ navigation }) => {
       if (user) {
         await NotificationService.evaluateFeeDeadlineNotification(user);
       }
-      const list = await NotificationService.getNotifications();
+      const list = await NotificationService.getNotifications(user?.id);
       setNotifications(list);
     } catch (e) {
       console.warn('Error fetching notifications:', e);
@@ -167,7 +168,12 @@ export const HomeScreen = ({ navigation }) => {
 
   const daysRem = user?.daysRemaining !== undefined ? user.daysRemaining : 30;
   const overdueDays = user?.overdueDays !== undefined ? user.overdueDays : 0;
-  const isDeactivated = user?.status === 'Suspended' || user?.status === 'Inactive' || user?.status === 'Deactivated' || overdueDays > 7;
+  const isDeactivated =
+    user?.status === 'Suspended' ||
+    user?.status === 'Inactive' ||
+    user?.status === 'Deactivated' ||
+    user?.status === 'Expired' ||
+    daysRem <= 0;
 
   // 7-Day Workout Tracker Data
   const daysOfWeek = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
@@ -207,6 +213,42 @@ export const HomeScreen = ({ navigation }) => {
           isCheckedIn={isCheckedIn}
           checkInTime={checkInTime}
         />
+
+        {/* Active Add-Ons (e.g. Cardio Access 30-Day Independent Pass) */}
+        {user?.activeAddons && user.activeAddons.length > 0 ? (
+          <View style={styles.addonsContainer}>
+            {user.activeAddons.map((addon) => (
+              <View key={addon.id} style={styles.addonCard}>
+                <View style={styles.addonIconBox}>
+                  <Text style={styles.addonIconText}>{addon.icon || '🏃'}</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <View style={styles.addonTitleRow}>
+                    <Text style={styles.addonName}>{addon.name}</Text>
+                    <View
+                      style={[
+                        styles.addonStatusBadge,
+                        addon.daysRemaining > 0 ? styles.addonActiveBadge : styles.addonExpiredBadge,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.addonStatusText,
+                          addon.daysRemaining > 0 ? styles.addonActiveText : styles.addonExpiredText,
+                        ]}
+                      >
+                        {addon.daysRemaining > 0 ? `${addon.daysRemaining}d Left` : 'Expired'}
+                      </Text>
+                    </View>
+                  </View>
+                  <Text style={styles.addonSub}>
+                    Independent Pass • PKR {Number(addon.price).toLocaleString()}
+                  </Text>
+                </View>
+              </View>
+            ))}
+          </View>
+        ) : null}
 
         {/* Upcoming Renewal Alert Card (if expiring or overdue) */}
         <UpcomingRenewalCard
@@ -336,6 +378,7 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: colors.background,
+    paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 28) + 4 : 0,
   },
   scrollContent: {
     paddingHorizontal: 16,
@@ -519,6 +562,77 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     marginTop: 8,
     letterSpacing: 0.8,
+  },
+  addonsContainer: {
+    marginVertical: 4,
+    gap: 8,
+  },
+  addonCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    gap: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    elevation: 1,
+  },
+  addonIconBox: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    backgroundColor: '#F1F5F9',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addonIconText: {
+    fontSize: 20,
+  },
+  addonTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 2,
+  },
+  addonName: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.textPrimary,
+  },
+  addonStatusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+  },
+  addonActiveBadge: {
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1,
+    borderColor: '#DCFCE7',
+  },
+  addonExpiredBadge: {
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+  },
+  addonStatusText: {
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  addonActiveText: {
+    color: colors.primaryDark,
+  },
+  addonExpiredText: {
+    color: '#DC2626',
+  },
+  addonSub: {
+    fontSize: 11,
+    color: colors.textMuted,
+    fontWeight: '500',
   },
 });
 

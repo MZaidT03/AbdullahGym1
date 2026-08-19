@@ -30,18 +30,25 @@ export const PaymentCard = ({
 
   const badge = getBadgeConfig(status);
 
+  // Clean title: remove redundant (PKR ...) or [Add-ons: ...]
+  const cleanedTitle = (title || 'Monthly Membership Fee')
+    .split(' [Add-ons:')[0]
+    .split(' [Next:')[0]
+    .replace(/\s*\(PKR.*?\)/i, '')
+    .trim();
+
   if (isCurrent) {
     return (
       <View style={styles.currentCard}>
         <View style={styles.glowOverlay} />
 
         <View style={styles.currentHeader}>
-          <View>
+          <View style={{ flex: 1, marginRight: 10 }}>
             <Text style={styles.billingTag}>ACTIVE SUBSCRIPTION BILLING</Text>
-            <Text style={styles.currentTitle}>{title}</Text>
+            <Text style={styles.currentTitle} numberOfLines={2}>{cleanedTitle}</Text>
           </View>
 
-          <View style={[styles.statusBadge, { backgroundColor: badge.bg }]}>
+          <View style={[styles.statusBadge, { backgroundColor: badge.bg, flexShrink: 0 }]}>
             <View style={[styles.statusDot, { backgroundColor: badge.dot }]} />
             <Text style={[styles.statusText, { color: badge.text }]}>{badge.label}</Text>
           </View>
@@ -70,9 +77,11 @@ export const PaymentCard = ({
         <View style={styles.historyIconBox}>
           <Ionicons name="receipt" size={18} color={colors.primaryDark} />
         </View>
-        <View>
-          <Text style={styles.historyTitle}>{title}</Text>
-          <Text style={styles.historyMeta}>
+        <View style={styles.historyTextCol}>
+          <Text style={styles.historyTitle} numberOfLines={1} ellipsizeMode="tail">
+            {cleanedTitle}
+          </Text>
+          <Text style={styles.historyMeta} numberOfLines={1} ellipsizeMode="tail">
             {date} • <Text style={styles.methodText}>{method}</Text>
           </Text>
           {invoiceId ? <Text style={styles.invoiceText}>{invoiceId}</Text> : null}
@@ -80,7 +89,7 @@ export const PaymentCard = ({
       </View>
 
       <View style={styles.historyRight}>
-        <Text style={styles.historyAmount}>{amount}</Text>
+        <Text style={styles.historyAmount} numberOfLines={1}>{amount}</Text>
         <View style={[styles.historyBadge, { backgroundColor: badge.bg }]}>
           <View style={[styles.statusDot, { backgroundColor: badge.dot }]} />
           <Text style={[styles.historyBadgeText, { color: badge.text }]}>{badge.label}</Text>
@@ -188,19 +197,24 @@ const styles = StyleSheet.create({
   historyLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 10,
     flex: 1,
+    marginRight: 8,
   },
   historyIconBox: {
-    width: 38,
-    height: 38,
-    borderRadius: 11,
+    width: 36,
+    height: 36,
+    borderRadius: 10,
     backgroundColor: '#F0FDF4',
     justifyContent: 'center',
     alignItems: 'center',
+    flexShrink: 0,
+  },
+  historyTextCol: {
+    flex: 1,
   },
   historyTitle: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '700',
     color: colors.textPrimary,
   },
@@ -221,10 +235,11 @@ const styles = StyleSheet.create({
   },
   historyRight: {
     alignItems: 'flex-end',
-    gap: 4,
+    flexShrink: 0,
+    gap: 3,
   },
   historyAmount: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '800',
     color: colors.textPrimary,
   },
@@ -233,7 +248,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 4,
     paddingHorizontal: 7,
-    paddingVertical: 3,
+    paddingVertical: 2.5,
     borderRadius: 6,
   },
   historyBadgeText: {
