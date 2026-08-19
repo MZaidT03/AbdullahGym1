@@ -34,7 +34,8 @@ if (Platform.OS === 'web' && typeof document !== 'undefined') {
 
 export default function App() {
   const [fontsLoaded] = useFonts({
-    ...(Ionicons.font || {}),
+    ionicons: require('@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/Ionicons.ttf'),
+    Ionicons: require('@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/Ionicons.ttf'),
   });
 
   return (
