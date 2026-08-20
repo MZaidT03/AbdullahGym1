@@ -14,11 +14,13 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   email TEXT NOT NULL,
   full_name TEXT,
+  phone TEXT,
   gender TEXT DEFAULT 'Male' CHECK (gender IN ('Male', 'Female', 'Other')),
   avatar_url TEXT,
   role TEXT DEFAULT 'member' CHECK (role IN ('member', 'admin', 'trainer')),
   member_id TEXT UNIQUE,
   plan TEXT DEFAULT 'Pro Membership',
+  plan_id TEXT,
   days_remaining INTEGER DEFAULT 30,
   status TEXT DEFAULT 'Active' CHECK (status IN ('Active', 'Inactive', 'Deactivated', 'Expired', 'Pending', 'Suspended')),
   created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -26,8 +28,10 @@ CREATE TABLE IF NOT EXISTS public.profiles (
 );
 
 -- Migration for existing database tables:
+ALTER TABLE IF EXISTS public.profiles ADD COLUMN IF NOT EXISTS phone TEXT;
 ALTER TABLE IF EXISTS public.profiles ADD COLUMN IF NOT EXISTS gender TEXT DEFAULT 'Male';
 ALTER TABLE IF EXISTS public.profiles ADD COLUMN IF NOT EXISTS active_addons JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE IF EXISTS public.profiles ADD COLUMN IF NOT EXISTS plan_id TEXT;
 
 -- Update status CHECK constraint on profiles to support all active & inactive states
 ALTER TABLE IF EXISTS public.profiles DROP CONSTRAINT IF EXISTS profiles_status_check;
@@ -70,7 +74,7 @@ CREATE POLICY "Allow all for attendance"
   USING (true)
   WITH CHECK (true);
 
--- 3. Create Payments Table
+-- 3. Create Payments Table (Unified single table for all membership & addon payments)
 CREATE TABLE IF NOT EXISTS public.payments (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   user_id UUID NOT NULL,
@@ -79,8 +83,10 @@ CREATE TABLE IF NOT EXISTS public.payments (
   status TEXT DEFAULT 'Paid' CHECK (status IN ('Paid', 'Partial', 'Unpaid', 'Pending Approval', 'Pending', 'Failed', 'Rejected')),
   invoice_id TEXT UNIQUE,
   payment_method TEXT DEFAULT 'Credit Card',
-  payment_type TEXT DEFAULT 'membership', -- 'membership', 'addon', 'bundle'
+  payment_type TEXT DEFAULT 'membership', -- 'membership', 'addon', 'walkin', 'bundle'
   item_name TEXT,
+  addon_id TEXT,
+  plan_id TEXT,
   proof_url TEXT,
   date TIMESTAMPTZ DEFAULT NOW(),
   created_at TIMESTAMPTZ DEFAULT NOW()
@@ -94,6 +100,8 @@ ALTER TABLE IF EXISTS public.payments ADD COLUMN IF NOT EXISTS proof_url TEXT;
 ALTER TABLE IF EXISTS public.payments ADD COLUMN IF NOT EXISTS total_fee NUMERIC(10, 2);
 ALTER TABLE IF EXISTS public.payments ADD COLUMN IF NOT EXISTS payment_type TEXT DEFAULT 'membership';
 ALTER TABLE IF EXISTS public.payments ADD COLUMN IF NOT EXISTS item_name TEXT;
+ALTER TABLE IF EXISTS public.payments ADD COLUMN IF NOT EXISTS addon_id TEXT;
+ALTER TABLE IF EXISTS public.payments ADD COLUMN IF NOT EXISTS plan_id TEXT;
 ALTER TABLE IF EXISTS public.payments ALTER COLUMN total_fee DROP DEFAULT;
 
 -- Cleanup script: Fix existing rows where total_fee defaulted to 5000 instead of actual amount
@@ -133,11 +141,12 @@ BEGIN
   -- Generate a clean Member ID e.g., GP-8472-991
   generated_id := 'GP-' || floor(random() * (9000-1000 + 1) + 1000)::text || '-' || floor(random() * (999-100 + 1) + 100)::text;
 
-  INSERT INTO public.profiles (id, email, full_name, gender, avatar_url, role, member_id, plan, days_remaining, status)
+  INSERT INTO public.profiles (id, email, full_name, phone, gender, avatar_url, role, member_id, plan, days_remaining, status)
   VALUES (
     NEW.id,
     NEW.email,
     COALESCE(NEW.raw_user_meta_data->>'full_name', SPLIT_PART(NEW.email, '@', 1)),
+    NEW.raw_user_meta_data->>'phone',
     COALESCE(NEW.raw_user_meta_data->>'gender', 'Male'),
     COALESCE(NEW.raw_user_meta_data->>'avatar_url', 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=250'),
     COALESCE(NEW.raw_user_meta_data->>'role', 'member'),
@@ -149,6 +158,7 @@ BEGIN
   ON CONFLICT (id) DO UPDATE SET
     email = EXCLUDED.email,
     full_name = EXCLUDED.full_name,
+    phone = EXCLUDED.phone,
     gender = EXCLUDED.gender;
 
   RETURN NEW;

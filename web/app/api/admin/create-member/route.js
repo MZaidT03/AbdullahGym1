@@ -8,7 +8,7 @@ const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 export async function POST(request) {
   try {
     const body = await request.json();
-    const { email, password, full_name, gender, plan, fee_paid, payment_method, avatar_url } = body;
+    const { email, password, full_name, gender, plan, fee_paid, payment_method, avatar_url, phone, plan_id } = body;
     const memberGender = gender && ["Male", "Female"].includes(gender) ? gender : "Male";
 
     if (!email || !password || !full_name) {
@@ -32,7 +32,13 @@ export async function POST(request) {
         email: cleanEmail,
         password: password,
         email_confirm: true,
-        user_metadata: { full_name, gender: memberGender, role: "member", avatar_url: avatar_url || "" },
+        user_metadata: {
+          full_name,
+          phone: phone ? String(phone).trim() : "",
+          gender: memberGender,
+          role: "member",
+          avatar_url: avatar_url || "",
+        },
       });
 
       if (adminUserError) {
@@ -50,7 +56,13 @@ export async function POST(request) {
         email: cleanEmail,
         password: password,
         options: {
-          data: { full_name, gender: memberGender, role: "member", avatar_url: avatar_url || "" },
+          data: {
+            full_name,
+            phone: phone ? String(phone).trim() : "",
+            gender: memberGender,
+            role: "member",
+            avatar_url: avatar_url || "",
+          },
         },
       });
 
@@ -88,45 +100,126 @@ export async function POST(request) {
       }
     }
 
+    // Active Addons payload with 30-day lifecycles
+    const incomingAddons = Array.isArray(body.active_addons) ? body.active_addons : [];
+    const activeAddonsPayload = incomingAddons.map((addon) => ({
+      id: addon.id,
+      addon_id: addon.id,
+      name: addon.name,
+      price: Number(addon.price) || 1500,
+      icon: addon.icon || "🏃",
+      start_date: new Date().toISOString(),
+      expiry_date: new Date(Date.now() + 30 * 86400000).toISOString(),
+      days_remaining: 30,
+      status: "Active",
+    }));
+
     // Save/Upsert Profile in public.profiles
     const supabasePublic = createClient(supabaseUrl, supabaseAnonKey);
     const profilePayload = {
       id: userId,
       email: cleanEmail,
       full_name: full_name,
+      phone: phone ? String(phone).trim() : null,
       gender: memberGender,
       avatar_url: avatar_url || null,
       member_id: generatedMemberId,
       plan: cleanPlanName,
+      plan_id: plan_id || body.plan_id || null,
+      active_addons: activeAddonsPayload,
       days_remaining: 30,
       status: "Active",
       created_at: new Date().toISOString(),
     };
 
-    const { error: profileErr } = await supabasePublic
+    let { error: profileErr } = await supabasePublic
       .from("profiles")
       .upsert([profilePayload], { onConflict: "id" });
+
+    // Fallback: If 'phone' or 'plan_id' column does not exist yet in Supabase schema cache
+    if (profileErr && profileErr.message && (profileErr.message.includes("phone") || profileErr.message.includes("schema cache") || profileErr.message.includes("plan_id"))) {
+      console.warn("Retrying profile insert without missing column (database migration pending):", profileErr.message);
+      const fallbackPayload = { ...profilePayload };
+      if (profileErr.message.includes("phone")) delete fallbackPayload.phone;
+      if (profileErr.message.includes("plan_id")) delete fallbackPayload.plan_id;
+      const retryRes = await supabasePublic
+        .from("profiles")
+        .upsert([fallbackPayload], { onConflict: "id" });
+      profileErr = retryRes.error;
+    }
 
     if (profileErr) {
       return NextResponse.json({ success: false, error: `Profile error: ${profileErr.message}` }, { status: 400 });
     }
 
-    // Insert fee in public.payments
-    try {
-      const parsedFee = parseFloat(String(fee_paid).replace(/,/g, ""));
-      const numericFee = !isNaN(parsedFee) ? parsedFee : 1600;
-      await supabasePublic.from("payments").insert([
-        {
+    // Sync member_addons table if any add-ons were assigned
+    if (activeAddonsPayload.length > 0) {
+      try {
+        const memberAddonRows = activeAddonsPayload.map((a) => ({
           user_id: userId,
-          amount: numericFee,
-          status: "Paid",
-          payment_method: payment_method || "Cash / Desk",
-          invoice_id: `INV-2026-${Math.floor(1000 + Math.random() * 9000)}`,
-          date: new Date().toISOString(),
-        },
-      ]);
+          addon_id: a.id,
+          name: a.name,
+          price: a.price,
+          status: "Active",
+          start_date: a.start_date,
+          expiry_date: a.expiry_date,
+        }));
+        await supabasePublic.from("member_addons").insert(memberAddonRows);
+      } catch (addonSyncErr) {
+        console.warn("Member addons insert notice:", addonSyncErr);
+      }
+    }
+
+    // Insert base membership payment into payments, and addon payments into addon_payments table
+    try {
+      const cleanPlanTitle = (plan || "Standard Monthly Pass").split(" [Add-ons:")[0].trim();
+      const currentYear = new Date().getFullYear();
+
+      // 1. Base membership payment row
+      const parsedFee = parseFloat(String(fee_paid).replace(/,/g, ""));
+      const totalNumericFee = !isNaN(parsedFee) ? parsedFee : 1600;
+
+      let addonsSum = 0;
+      if (activeAddonsPayload && activeAddonsPayload.length > 0) {
+        addonsSum = activeAddonsPayload.reduce((sum, a) => sum + (Number(a.price) || 0), 0);
+      }
+      const basePlanNumericFee = Math.max(0, totalNumericFee - addonsSum) || totalNumericFee;
+
+      const gymPayment = {
+        user_id: userId,
+        amount: basePlanNumericFee,
+        total_fee: basePlanNumericFee,
+        status: "Paid",
+        payment_method: payment_method || "Cash / Desk",
+        payment_type: "membership",
+        item_name: cleanPlanTitle,
+        plan_id: plan_id || null,
+        invoice_id: `INV-${currentYear}-${Math.floor(1000 + Math.random() * 9000)}`,
+        date: new Date().toISOString(),
+      };
+
+      await supabasePublic.from("payments").insert([gymPayment]);
+
+      // 2. Insert into dedicated addon_payments table for each active add-on
+      if (activeAddonsPayload && activeAddonsPayload.length > 0) {
+        const addonPaymentsToInsert = activeAddonsPayload.map((addon, idx) => {
+          const addonPrice = Number(addon.price) || 1500;
+          return {
+            user_id: userId,
+            addon_id: addon.addon_id || addon.id || `addon-${idx + 1}`,
+            addon_name: addon.name || "Add-On Service",
+            amount: addonPrice,
+            status: "Paid",
+            payment_method: payment_method || "Cash / Desk",
+            invoice_id: `INV-ADD-${currentYear}-${Math.floor(1000 + Math.random() * 9000)}`,
+            date: new Date().toISOString(),
+          };
+        });
+
+        await supabasePublic.from("addon_payments").insert(addonPaymentsToInsert);
+      }
     } catch (payErr) {
-      console.warn("Payment insert warning:", payErr);
+      console.warn("Payment insert notice:", payErr);
     }
 
     return NextResponse.json({

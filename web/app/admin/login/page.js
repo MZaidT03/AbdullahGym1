@@ -127,20 +127,11 @@ export default function AdminLoginPage() {
           return;
         }
 
-        if (profile.status === "Suspended") {
-          await supabase.auth.signOut();
-          setErrorMsg("⛔ Account Suspended: Your administrator account has been suspended.");
-          handleFailedAttempt();
-          setLoading(false);
-          return;
-        }
-
-        if (profile.status === "Expired") {
-          await supabase.auth.signOut();
-          setErrorMsg("⛔ Account Expired: Your administrator account access has expired.");
-          handleFailedAttempt();
-          setLoading(false);
-          return;
+        if (profile.role === "admin" && (profile.status === "Suspended" || profile.status === "Expired")) {
+          try {
+            await supabase.from("profiles").update({ status: "Active" }).eq("id", data.user.id);
+          } catch (e) {}
+          profile.status = "Active";
         }
 
         // Clear failed login counters on successful admin login

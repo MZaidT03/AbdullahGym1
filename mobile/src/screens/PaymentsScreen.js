@@ -51,10 +51,10 @@ const decodeBase64ToArrayBuffer = (base64) => {
 };
 
 export const PaymentsScreen = () => {
-  const { user, refreshProfile, removeMemberAddon } = useAuth();
+  const { user, refreshProfile, removeMemberAddon, availablePlans } = useAuth();
   const { showDialog } = useDialog();
 
-  const baseMembershipFee = user?.monthlyFee || resolvePlanFee(user?.plan) || 5000;
+  const baseMembershipFee = user?.monthlyFee || resolvePlanFee(user?.plan, availablePlans) || 5000;
   const activeAddonsList = user?.activeAddons || [];
   const primaryAddon = activeAddonsList.length > 0 ? activeAddonsList[0] : { id: 'addon-1', addonId: 'addon-1', name: 'Cardio Access Plan', price: 1500, icon: '🏃' };
   const addonFee = Number(primaryAddon.price) || 1500;
@@ -71,6 +71,7 @@ export const PaymentsScreen = () => {
   // Form states
   const [selectedAccIndex, setSelectedAccIndex] = useState(0);
   const [paymentOption, setPaymentOption] = useState('membership'); // 'membership' | 'addon' | 'bundle'
+  const [selectedAddonForPayment, setSelectedAddonForPayment] = useState(null);
   const [amount, setAmount] = useState(String(baseMembershipFee));
   const [transactionNote, setTransactionNote] = useState('');
   const [screenshotUri, setScreenshotUri] = useState(null);
@@ -123,16 +124,16 @@ export const PaymentsScreen = () => {
         const normalizedGym = (gymPayData || []).map((p) => ({
           ...p,
           isAddon: false,
-          displayTitle: `${cleanPlanName(user?.plan || 'Pro Membership')}`,
+          displayTitle: `${cleanPlanName(p.item_name || user?.plan || 'Standard Monthly Pass')}`,
         }));
 
-        const normalizedAddon = (addonPayData || []).map((p) => ({
+        const normalizedAddons = (addonPayData || []).map((p) => ({
           ...p,
           isAddon: true,
-          displayTitle: `${p.addon_name || 'Cardio Pass'} (Add-on)`,
+          displayTitle: `${p.addon_name || p.item_name || 'Cardio Access'} (Add-on)`,
         }));
 
-        const combinedList = [...normalizedGym, ...normalizedAddon].sort(
+        const combinedList = [...normalizedGym, ...normalizedAddons].sort(
           (a, b) => new Date(b.date || 0) - new Date(a.date || 0)
         );
 
@@ -301,7 +302,20 @@ export const PaymentsScreen = () => {
   let renewalOpenDateObj = null;
 
   const paidPayments = payments
-    .filter((p) => p.status === 'Paid' && p.date)
+    .filter((p) => {
+      if (p.status !== 'Paid' || !p.date) return false;
+      if (p.payment_type === 'addon' || p.is_addon) return false;
+      const itName = (p.item_name || p.plan || '').toLowerCase();
+      if (
+        itName.includes('(add-on)') ||
+        itName.includes('add-on') ||
+        itName.includes('cardio') ||
+        itName.includes('trainer') ||
+        itName.includes('sauna')
+      )
+        return false;
+      return true;
+    })
     .sort((a, b) => new Date(a.date) - new Date(b.date));
 
   if (paidPayments.length > 0) {
@@ -351,24 +365,52 @@ export const PaymentsScreen = () => {
   }
 
   const handleSubmitOnlinePayment = async () => {
-    if (hasPendingProof) {
-      showDialog({
-        title: 'Proof Under Review ⏳',
-        message: 'Your payment transfer proof has already been submitted and is currently being verified by admin.',
-        type: 'info',
-      });
-      setModalVisible(false);
-      return;
-    }
+    const isAddonOnlyPayment = paymentOption === 'addon';
 
-    if (!isEligibleToPay) {
-      showDialog({
-        title: 'Renewal Window Not Open 🔒',
-        message: `Payment renewal opens 10 days before expiry (on ${renewalOpenDateStr}). You currently have ${daysRemaining} days remaining on your active membership.`,
-        type: 'info',
-      });
-      setModalVisible(false);
-      return;
+    if (isAddonOnlyPayment) {
+      // Standalone Add-on Renewal check: verify if this specific add-on has a pending proof
+      const targetAddon = selectedAddonForPayment || primaryAddon;
+      const targetAddonId = targetAddon?.id || targetAddon?.addonId;
+      const targetAddonName = targetAddon?.name || 'Cardio';
+
+      const hasPendingForThisAddon = payments.some(
+        (p) =>
+          (p.status === 'Pending Approval' || p.status === 'Pending') &&
+          (p.payment_type === 'addon' ||
+            p.addon_id === targetAddonId ||
+            (p.item_name || '').toLowerCase().includes(targetAddonName.toLowerCase()))
+      );
+
+      if (hasPendingForThisAddon) {
+        showDialog({
+          title: 'Proof Under Review ⏳',
+          message: `Your payment proof for '${targetAddonName}' has already been submitted and is currently being verified by admin.`,
+          type: 'info',
+        });
+        setModalVisible(false);
+        return;
+      }
+    } else {
+      // Main Membership Renewal check
+      if (hasPendingProof) {
+        showDialog({
+          title: 'Proof Under Review ⏳',
+          message: 'Your payment transfer proof has already been submitted and is currently being verified by admin.',
+          type: 'info',
+        });
+        setModalVisible(false);
+        return;
+      }
+
+      if (!isEligibleToPay) {
+        showDialog({
+          title: 'Renewal Window Not Open 🔒',
+          message: `Payment renewal opens 10 days before expiry (on ${renewalOpenDateStr}). You currently have ${daysRemaining} days remaining on your active membership.`,
+          type: 'info',
+        });
+        setModalVisible(false);
+        return;
+      }
     }
 
     if (!screenshotUri) {
@@ -450,12 +492,17 @@ export const PaymentsScreen = () => {
           if (uploadedPublicUrl) gymPayload.proof_url = uploadedPublicUrl;
           await supabase.from('payments').insert([gymPayload]);
         } else if (paymentOption === 'addon') {
-          // 2. Add-on Payment ONLY (into addon_payments table, NEVER payments table!)
+          // 2. Add-on Payment ONLY (into dedicated addon_payments table)
+          const targetAddon = selectedAddonForPayment || primaryAddon;
+          const targetAddonId = targetAddon.id || targetAddon.addonId || 'addon-1';
+          const targetAddonName = targetAddon.name || 'Cardio Access Plan';
+          const targetAddonPrice = Number(amount) || Number(targetAddon.price) || addonFee;
+
           const addonPayload = {
             user_id: user.id,
-            addon_id: primaryAddon.addonId || primaryAddon.id || 'addon-1',
-            addon_name: primaryAddon.name || 'Cardio Access Plan',
-            amount: addonFee,
+            addon_id: targetAddonId,
+            addon_name: targetAddonName,
+            amount: targetAddonPrice,
             status: 'Pending Approval',
             payment_method: `${activeAccount.provider} Transfer`,
             invoice_id: `INV-ADD-${currentYear}-${Math.floor(1000 + Math.random() * 9000)}`,
@@ -464,7 +511,7 @@ export const PaymentsScreen = () => {
           if (uploadedPublicUrl) addonPayload.proof_url = uploadedPublicUrl;
           await supabase.from('addon_payments').insert([addonPayload]);
         } else if (paymentOption === 'bundle') {
-          // 3. Both Combined: 1 Gym payment + 1 Addon payment
+          // 3. Both Combined: Insert 1 Gym payment row into payments + 1 Addon row into addon_payments
           const gymPayload = {
             user_id: user.id,
             amount: baseMembershipFee,
@@ -478,11 +525,12 @@ export const PaymentsScreen = () => {
           };
           if (uploadedPublicUrl) gymPayload.proof_url = uploadedPublicUrl;
 
+          const targetAddon = selectedAddonForPayment || primaryAddon;
           const addonPayload = {
             user_id: user.id,
-            addon_id: primaryAddon.addonId || primaryAddon.id || 'addon-1',
-            addon_name: primaryAddon.name || 'Cardio Access Plan',
-            amount: addonFee,
+            addon_id: targetAddon.addonId || targetAddon.id || 'addon-1',
+            addon_name: targetAddon.name || 'Cardio Access Plan',
+            amount: Number(targetAddon.price) || addonFee,
             status: 'Pending Approval',
             payment_method: `${activeAccount.provider} Transfer`,
             invoice_id: `INV-ADD-${currentYear}-${Math.floor(1000 + Math.random() * 9000)}`,
@@ -490,10 +538,8 @@ export const PaymentsScreen = () => {
           };
           if (uploadedPublicUrl) addonPayload.proof_url = uploadedPublicUrl;
 
-          await Promise.all([
-            supabase.from('payments').insert([gymPayload]),
-            supabase.from('addon_payments').insert([addonPayload]),
-          ]);
+          await supabase.from('payments').insert([gymPayload]);
+          await supabase.from('addon_payments').insert([addonPayload]);
         }
       }
 
@@ -658,6 +704,7 @@ export const PaymentsScreen = () => {
                         <TouchableOpacity
                           style={styles.addonPayBtn}
                           onPress={() => {
+                            setSelectedAddonForPayment(addon);
                             setPaymentOption('addon');
                             setAmount(String(addon.price || 1500));
                             setModalVisible(true);

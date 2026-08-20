@@ -17,10 +17,106 @@ export const cleanPlanName = (planStr = '') => {
   return clean.trim() || 'Pro Membership';
 };
 
-export const resolvePlanFee = (planName = '', paymentFee = null, profileFee = null) => {
+export const fetchActivePlans = async () => {
+  if (isSupabaseConfigured()) {
+    try {
+      const { data, error } = await supabase
+        .from('gym_plans')
+        .select('*')
+        .eq('active', true)
+        .order('created_at', { ascending: true });
+
+      if (!error && data && data.length > 0) {
+        return data;
+      }
+
+      // Fallback to gym_settings key 'gym_plans'
+      const { data: setObj } = await supabase
+        .from('gym_settings')
+        .select('value')
+        .eq('key', 'gym_plans')
+        .maybeSingle();
+
+      if (setObj?.value && Array.isArray(setObj.value) && setObj.value.length > 0) {
+        return setObj.value.filter((p) => p.active !== false);
+      }
+    } catch (e) {
+      console.warn('Failed to fetch gym_plans in mobile app:', e);
+    }
+  }
+  return [];
+};
+
+export const fetchActiveAddons = async () => {
+  if (isSupabaseConfigured()) {
+    try {
+      const { data, error } = await supabase
+        .from('gym_addons')
+        .select('*')
+        .eq('active', true)
+        .order('created_at', { ascending: true });
+
+      if (!error && data && data.length > 0) {
+        return data;
+      }
+
+      // Fallback to gym_settings key 'gym_addons'
+      const { data: setObj } = await supabase
+        .from('gym_settings')
+        .select('value')
+        .eq('key', 'gym_addons')
+        .maybeSingle();
+
+      if (setObj?.value && Array.isArray(setObj.value) && setObj.value.length > 0) {
+        return setObj.value.filter((a) => a.active !== false);
+      }
+    } catch (e) {
+      console.warn('Failed to fetch gym_addons in mobile app:', e);
+    }
+  }
+  return [];
+};
+
+export const resolvePlanFee = (
+  planName = '',
+  dynamicPlans = [],
+  profileFee = null,
+  paymentFee = null
+) => {
   const cleanPlan = cleanPlanName(planName);
 
-  // Extract embedded PKR price in clean base plan string e.g. "VIP Champion Pass (PKR 9,000/mo)"
+  // 1. Direct match with live dynamic plans from Supabase (gym_plans / gym_settings)
+  if (dynamicPlans && dynamicPlans.length > 0) {
+    const lower = cleanPlan.toLowerCase();
+    const matchedPlan = dynamicPlans.find((p) => {
+      if (!p.name) return false;
+      const pName = p.name.toLowerCase();
+      return (
+        lower === pName ||
+        lower.includes(pName) ||
+        pName.includes(lower) ||
+        (lower.includes('pro') && pName.includes('pro') && !lower.includes('vip') && !pName.includes('vip')) ||
+        (lower.includes('vip') && pName.includes('vip')) ||
+        (lower.includes('standard') && pName.includes('standard'))
+      );
+    });
+
+    if (matchedPlan) {
+      const price =
+        matchedPlan.monthly_price ??
+        matchedPlan.monthlyPrice ??
+        matchedPlan.daily_price ??
+        matchedPlan.dailyPrice;
+      if (price !== undefined && price !== null && !isNaN(Number(price)) && Number(price) > 0) {
+        return Number(price);
+      }
+    }
+  }
+
+  // 2. Explicit custom profile fee override if present
+  if (profileFee && Number(profileFee) > 0) return Number(profileFee);
+
+  // 3. Extract embedded PKR price in clean base plan string e.g. "VIP Champion Pass (PKR 9,000/mo)"
   const pkrMatch = cleanPlan.match(/(?:PKR|Rs\.?)\s*([\d,]+)/i);
   if (pkrMatch && pkrMatch[1]) {
     const parsed = parseInt(pkrMatch[1].replace(/,/g, ''), 10);
@@ -33,7 +129,7 @@ export const resolvePlanFee = (planName = '', paymentFee = null, profileFee = nu
     if (!isNaN(parsed) && parsed > 0) return parsed;
   }
 
-  // Keyword / Plan Tier mapping
+  // 4. Keyword / Plan Tier fallback mapping
   const lower = cleanPlan.toLowerCase();
   if (lower.includes('vip') || lower.includes('champion') || lower.includes('9000')) {
     return 9000;
@@ -56,7 +152,6 @@ export const resolvePlanFee = (planName = '', paymentFee = null, profileFee = nu
     return 5000;
   }
 
-  if (profileFee && Number(profileFee) > 0) return Number(profileFee);
   if (paymentFee && Number(paymentFee) > 0) return Number(paymentFee);
 
   return 5000;
@@ -71,6 +166,7 @@ export const AuthProvider = ({ children }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [isCheckedIn, setIsCheckedIn] = useState(false);
   const [checkInTime, setCheckInTime] = useState(null);
+  const [availablePlans, setAvailablePlans] = useState([]);
 
   useEffect(() => {
     initAuth();
@@ -118,13 +214,24 @@ export const AuthProvider = ({ children }) => {
       }
 
       // Check DB status (case-insensitive)
+      const userRole = (data?.role || 'member').toLowerCase();
+      const isAdmin = userRole === 'admin';
+
       const rawDbStatus = (data?.status || 'Active').trim().toLowerCase();
       const isDbSuspended =
-        rawDbStatus === 'suspended' ||
-        rawDbStatus === 'disabled' ||
-        rawDbStatus === 'blocked';
+        !isAdmin &&
+        (rawDbStatus === 'suspended' ||
+          rawDbStatus === 'disabled' ||
+          rawDbStatus === 'blocked');
 
-      let calculatedDays = 0;
+      // Auto-heal admin accounts if previously marked as suspended
+      if (isAdmin && (rawDbStatus === 'suspended' || rawDbStatus === 'expired' || rawDbStatus === 'deactivated')) {
+        try {
+          supabase.from('profiles').update({ status: 'Active' }).eq('id', userId);
+        } catch (e) {}
+      }
+
+      let calculatedDays = isAdmin ? 999 : 0;
       let overdueDays = 0;
       let effectiveStatus = isDbSuspended ? 'Suspended' : 'Active';
       let lastPaymentRecord = null;
@@ -132,20 +239,24 @@ export const AuthProvider = ({ children }) => {
       let calculatedRenewalOpenDate = null;
       const now = new Date();
 
-      if (isSupabaseConfigured() && userId && !isDbSuspended) {
+      let allPaidPayments = [];
+
+      if (isSupabaseConfigured() && userId && !isDbSuspended && !isAdmin) {
         try {
           const { data: userPayments } = await supabase
             .from('payments')
-            .select('date, status, amount, total_fee, payment_type, item_name')
+            .select('date, status, amount, total_fee, payment_type, item_name, addon_id')
             .eq('user_id', userId)
             .eq('status', 'Paid')
             .order('date', { ascending: true });
 
+          allPaidPayments = userPayments || [];
+
           // Filter strictly monthly gym membership payments (exclude standalone addon payments)
-          const monthlyPayments = (userPayments || []).filter((pay) => {
+          const monthlyPayments = allPaidPayments.filter((pay) => {
             if (pay.payment_type && pay.payment_type === 'addon') return false;
             const itName = (pay.item_name || '').toLowerCase();
-            if (itName.includes('cardio') || itName.includes('add-on') || itName.includes('addon')) return false;
+            if (itName.includes('(add-on)') || itName.includes('cardio') || itName.includes('trainer') || itName.includes('sauna')) return false;
             return true;
           });
 
@@ -190,24 +301,32 @@ export const AuthProvider = ({ children }) => {
             }
           } else {
             // Member has NO paid monthly membership record in database
-            calculatedDays = 0;
-            overdueDays = 1;
-            effectiveStatus = 'Deactivated';
+            // Compute dynamic expiry based on profile creation/update timestamp
+            const profCreated = data?.created_at ? new Date(data.created_at) : null;
+            const refDate = data?.updated_at ? new Date(data.updated_at) : profCreated;
+            if (refDate) {
+              const initialDays = data?.days_remaining !== undefined && data?.days_remaining !== null ? Number(data.days_remaining) : 30;
+              const fallbackExpiry = new Date(refDate.getTime() + initialDays * 86400000);
+              calculatedExpiryDate = fallbackExpiry.toISOString();
+              const diffMs = fallbackExpiry.getTime() - now.getTime();
+              const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+              if (diffDays > 0) {
+                calculatedDays = diffDays;
+                overdueDays = 0;
+                effectiveStatus = 'Active';
+              } else {
+                calculatedDays = 0;
+                overdueDays = Math.max(1, Math.abs(diffDays));
+                effectiveStatus = 'Deactivated';
+              }
+            } else {
+              calculatedDays = 0;
+              overdueDays = 1;
+              effectiveStatus = 'Deactivated';
+            }
           }
         } catch (payErr) {
-          console.warn('Notice calculating remaining days:', payErr);
-          calculatedDays = 0;
-          overdueDays = 1;
-          effectiveStatus = 'Deactivated';
-        }
-      }
-
-      // Check explicit days_remaining on profile if present
-      if (data?.days_remaining !== undefined && data?.days_remaining !== null) {
-        const explicitDays = Number(data.days_remaining);
-        if (explicitDays <= 0) {
-          calculatedDays = 0;
-          effectiveStatus = 'Deactivated';
+          console.warn('Notice querying payments:', payErr);
         }
       }
 
@@ -225,16 +344,34 @@ export const AuthProvider = ({ children }) => {
         return null;
       }
 
+      const currentPlans = await fetchActivePlans();
+      if (currentPlans && currentPlans.length > 0) {
+        setAvailablePlans(currentPlans);
+      }
+
       const cleanPlan = cleanPlanName(data?.plan);
       const resolvedMonthlyFee = resolvePlanFee(
         cleanPlan,
-        lastPaymentRecord?.total_fee || lastPaymentRecord?.amount,
-        data?.monthly_fee || data?.fee || data?.price
+        currentPlans,
+        data?.monthly_fee || data?.fee || data?.price,
+        lastPaymentRecord?.total_fee || lastPaymentRecord?.amount
       );
 
-      // Fetch Independent Add-ons from member_addons table or fallback to profiles.active_addons
+      // Fetch Independent Add-ons from member_addons table and addon_payments
       let rawAddons = [];
+      let userAddonPayments = [];
+
       if (isSupabaseConfigured() && userId) {
+        try {
+          const { data: apRows } = await supabase
+            .from('addon_payments')
+            .select('*')
+            .eq('user_id', userId)
+            .eq('status', 'Paid')
+            .order('date', { ascending: true });
+          if (apRows) userAddonPayments = apRows;
+        } catch (apErr) {}
+
         try {
           const { data: dbAddons } = await supabase
             .from('member_addons')
@@ -268,10 +405,48 @@ export const AuthProvider = ({ children }) => {
         } catch (e) {}
       }
 
+      const currentAddons = await fetchActiveAddons();
       const parsedActiveAddons = rawAddons.map((addon) => {
+        const directId = addon.id || addon.addon_id;
+        const matchedAddon = (currentAddons || []).find(
+          (ca) => ca.id === directId || (ca.name && addon.name && ca.name.toLowerCase() === addon.name.toLowerCase())
+        );
+        const effectiveName = matchedAddon?.name || addon.name || 'Cardio Access Plan';
+        const cleanNameLower = effectiveName.toLowerCase();
+
+        // Find payments specific to this individual addon
+        const specificAddonPays = (userAddonPayments || []).filter((ap) => {
+          if (ap.addon_id && (ap.addon_id === directId || ap.addon_id === addon.addon_id)) return true;
+          const aPayName = (ap.addon_name || '').toLowerCase();
+          if (cleanNameLower.includes('cardio') && aPayName.includes('cardio')) return true;
+          if (cleanNameLower.includes('trainer') && aPayName.includes('trainer')) return true;
+          if (cleanNameLower.includes('sauna') && aPayName.includes('sauna')) return true;
+          return aPayName && cleanNameLower.includes(aPayName);
+        });
+
         let addonDays = 30;
         let addonExpiry = null;
-        if (addon.expiry_date) {
+
+        if (specificAddonPays.length > 0) {
+          // Compute expiry strictly from paid cycles for THIS individual addon
+          let runningAddonExpiry = null;
+          specificAddonPays.forEach((pay) => {
+            if (!pay.date) return;
+            const pDate = new Date(pay.date);
+            if (!runningAddonExpiry) {
+              runningAddonExpiry = new Date(pDate.getTime() + 30 * 86400000);
+            } else if (pDate <= runningAddonExpiry) {
+              runningAddonExpiry = new Date(runningAddonExpiry.getTime() + 30 * 86400000);
+            } else {
+              runningAddonExpiry = new Date(pDate.getTime() + 30 * 86400000);
+            }
+          });
+          addonExpiry = runningAddonExpiry;
+          if (addonExpiry) {
+            const diff = addonExpiry.getTime() - now.getTime();
+            addonDays = Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
+          }
+        } else if (addon.expiry_date) {
           addonExpiry = new Date(addon.expiry_date);
           const diff = addonExpiry.getTime() - now.getTime();
           addonDays = Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
@@ -281,12 +456,14 @@ export const AuthProvider = ({ children }) => {
           addonDays = Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
         }
 
+        const livePrice = matchedAddon ? Number(matchedAddon.price) : Number(addon.price) || 1500;
+
         return {
-          id: addon.id || addon.addon_id || 'addon-cardio',
-          addonId: addon.addon_id || addon.id,
-          name: addon.name || 'Cardio Access Plan',
-          price: Number(addon.price) || 1500,
-          icon: addon.icon || '🏃',
+          id: directId || 'addon-cardio',
+          addonId: directId,
+          name: effectiveName,
+          price: livePrice,
+          icon: matchedAddon?.icon || addon.icon || '🏃',
           startDate: addon.start_date || now.toISOString(),
           expiryDate: addonExpiry ? addonExpiry.toISOString() : null,
           daysRemaining: addonDays,
@@ -294,22 +471,25 @@ export const AuthProvider = ({ children }) => {
         };
       });
 
-      const isRenewalEligible = calculatedDays <= 10 || effectiveStatus !== 'Active';
+      const isRenewalEligible = !isAdmin && (calculatedDays <= 10 || effectiveStatus !== 'Active');
 
       const userData = {
         id: userId,
         name: data?.full_name?.split(' ')[0] || userEmail?.split('@')[0] || 'Member',
         fullName: data?.full_name || 'Abdullah Member',
         email: userEmail || data?.email || 'member@example.com',
+        phone: data?.phone || '',
         memberId: data?.member_id || 'GP-8472-991',
+        role: userRole,
+        isAdmin: isAdmin,
         plan: cleanPlan,
         upcomingPlan: data?.upcoming_plan || data?.next_plan || null,
         monthlyFee: resolvedMonthlyFee,
         activeAddons: parsedActiveAddons,
         avatar: data?.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=250',
         gender: data?.gender || 'Male',
-        daysRemaining: calculatedDays,
-        overdueDays: overdueDays,
+        daysRemaining: isAdmin ? 999 : calculatedDays,
+        overdueDays: isAdmin ? 0 : overdueDays,
         expiryDate: calculatedExpiryDate,
         renewalOpenDate: calculatedRenewalOpenDate,
         isRenewalEligible: isRenewalEligible,
@@ -319,7 +499,9 @@ export const AuthProvider = ({ children }) => {
       setUser(userData);
       setIsAuthenticated(true);
       await checkTodayStatus(userId);
-      NotificationService.evaluateFeeDeadlineNotification(userData).catch(() => {});
+      if (!isAdmin) {
+        NotificationService.evaluateFeeDeadlineNotification(userData).catch(() => {});
+      }
       return userData;
     } catch (err) {
       console.error('Error fetching profile from Supabase:', err);
@@ -597,6 +779,8 @@ export const AuthProvider = ({ children }) => {
         isLoading,
         isCheckedIn,
         checkInTime,
+        availablePlans,
+        fetchActivePlans,
         login,
         logout,
         toggleCheckIn: checkInMember,

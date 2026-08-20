@@ -363,19 +363,27 @@ export default function AdminConfigurationPage() {
           .select("*")
           .order("created_at", { ascending: true });
 
-        if (!error && data && data.length > 0) {
+        if (!error && data !== null) {
+          // Explicitly respect database state, even if empty (0 plans)
           setPlans(data);
           loadedFromSupabase = true;
-          setPlanStatusMsg("✓ Connected to Supabase gym_plans database table.");
-        } else if (!error && data && data.length === 0) {
-          const { data: seedData, error: seedError } = await supabase
-            .from("gym_plans")
-            .upsert(initialPlans, { onConflict: "id" })
-            .select();
-          if (!seedError && seedData) {
-            setPlans(seedData);
+          setPlanStatusMsg(
+            data.length > 0
+              ? "✓ Connected to Supabase gym_plans database table."
+              : "No plans currently in database. You can add a new plan or restore defaults."
+          );
+        } else {
+          // Fallback to gym_settings
+          const { data: setObj } = await supabase
+            .from("gym_settings")
+            .select("value")
+            .eq("key", "gym_plans")
+            .maybeSingle();
+
+          if (setObj && Array.isArray(setObj.value)) {
+            setPlans(setObj.value);
             loadedFromSupabase = true;
-            setPlanStatusMsg("✓ Seeded default plans into Supabase database.");
+            setPlanStatusMsg("✓ Connected to Supabase settings key 'gym_plans'");
           }
         }
       } catch (err) {
@@ -386,16 +394,60 @@ export default function AdminConfigurationPage() {
     if (!loadedFromSupabase) {
       try {
         const saved = localStorage.getItem("abdullah_gym_plans");
-        if (saved) {
+        if (saved !== null) {
           setPlans(JSON.parse(saved));
         } else {
-          setPlans(initialPlans);
+          setPlans([]);
         }
       } catch (e) {
-        setPlans(initialPlans);
+        setPlans([]);
       }
-      setPlanStatusMsg("Notice: Operating on local memory/storage.");
     }
+    setLoadingPlans(false);
+  };
+
+  // Helper to persist Plans list to Supabase and LocalStorage
+  const savePlansToSupabase = async (plansList, deletedPlanId = null) => {
+    if (isSupabaseConfigured()) {
+      if (deletedPlanId) {
+        try {
+          await supabase.from("gym_plans").delete().eq("id", deletedPlanId);
+        } catch (e) {
+          console.warn("Delete plan from table notice:", e);
+        }
+      } else if (plansList && plansList.length > 0) {
+        try {
+          await supabase.from("gym_plans").upsert(plansList, { onConflict: "id" });
+        } catch (e) {
+          console.warn("Upsert plans to table notice:", e);
+        }
+      } else if (plansList && plansList.length === 0) {
+        try {
+          await supabase.from("gym_plans").delete().neq("id", "none");
+        } catch (e) {}
+      }
+      try {
+        await supabase.from("gym_settings").upsert({
+          key: "gym_plans",
+          value: plansList || [],
+          updated_at: new Date().toISOString(),
+        });
+      } catch (e) {
+        console.warn("Save plans to settings notice:", e);
+      }
+    }
+    try {
+      localStorage.setItem("abdullah_gym_plans", JSON.stringify(plansList || []));
+    } catch (e) {}
+  };
+
+  // Restore Default Initial Plans (Manual Only)
+  const handleRestoreDefaultPlans = async () => {
+    if (!confirm("Restore standard default gym membership plans into the database?")) return;
+    setLoadingPlans(true);
+    setPlans(initialPlans);
+    await savePlansToSupabase(initialPlans);
+    setPlanStatusMsg("✓ Restored default plans into Supabase database.");
     setLoadingPlans(false);
   };
 
@@ -406,34 +458,32 @@ export default function AdminConfigurationPage() {
 
     if (isSupabaseConfigured()) {
       try {
-        // 1. Query Supabase settings key `gym_addons` safely
-        const { data: setObj } = await supabase
-          .from("gym_settings")
-          .select("value")
-          .eq("key", "gym_addons")
-          .maybeSingle();
+        const { data, error } = await supabase
+          .from("gym_addons")
+          .select("*")
+          .order("created_at", { ascending: true });
 
-        if (setObj && setObj.value && Array.isArray(setObj.value) && setObj.value.length > 0) {
-          setAddons(setObj.value);
+        if (!error && data !== null) {
+          // Explicitly respect database state, even if empty (0 addons)
+          setAddons(data);
           loadedFromSupabase = true;
-          setAddonStatusMsg("✓ Connected to Supabase settings key 'gym_addons'");
+          setAddonStatusMsg(
+            data.length > 0
+              ? "✓ Connected to Supabase table 'gym_addons'"
+              : "No add-on services in database. You can create an add-on or restore defaults."
+          );
         } else {
-          // 2. Try dedicated Supabase table `gym_addons`
-          const { data, error } = await supabase
-            .from("gym_addons")
-            .select("*")
-            .order("created_at", { ascending: true });
+          // Fallback to gym_settings
+          const { data: setObj } = await supabase
+            .from("gym_settings")
+            .select("value")
+            .eq("key", "gym_addons")
+            .maybeSingle();
 
-          if (!error && data && data.length > 0) {
-            setAddons(data);
+          if (setObj && Array.isArray(setObj.value)) {
+            setAddons(setObj.value);
             loadedFromSupabase = true;
-            setAddonStatusMsg("✓ Connected to Supabase table 'gym_addons'");
-          } else {
-            // Auto-seed initial addons into Supabase settings
-            await saveAddonsToSupabase(initialAddons);
-            setAddons(initialAddons);
-            loadedFromSupabase = true;
-            setAddonStatusMsg("✓ Seeded default add-on plans into Supabase");
+            setAddonStatusMsg("✓ Connected to Supabase settings key 'gym_addons'");
           }
         }
       } catch (err) {
@@ -444,32 +494,52 @@ export default function AdminConfigurationPage() {
     if (!loadedFromSupabase) {
       try {
         const saved = localStorage.getItem("abdullah_gym_addons");
-        if (saved) setAddons(JSON.parse(saved));
-        else setAddons(initialAddons);
+        if (saved !== null) setAddons(JSON.parse(saved));
+        else setAddons([]);
       } catch (e) {
-        setAddons(initialAddons);
+        setAddons([]);
       }
     }
     setLoadingAddons(false);
   };
 
   // Helper to persist Addons list to Supabase
-  const saveAddonsToSupabase = async (addonsList) => {
+  const saveAddonsToSupabase = async (addonsList, deletedAddonId = null) => {
     if (isSupabaseConfigured()) {
-      try {
-        await supabase.from("gym_addons").upsert(addonsList, { onConflict: "id" });
-      } catch (e) {}
+      if (deletedAddonId) {
+        try {
+          await supabase.from("gym_addons").delete().eq("id", deletedAddonId);
+        } catch (e) {}
+      } else if (addonsList && addonsList.length > 0) {
+        try {
+          await supabase.from("gym_addons").upsert(addonsList, { onConflict: "id" });
+        } catch (e) {}
+      } else if (addonsList && addonsList.length === 0) {
+        try {
+          await supabase.from("gym_addons").delete().neq("id", "none");
+        } catch (e) {}
+      }
       try {
         await supabase.from("gym_settings").upsert({
           key: "gym_addons",
-          value: addonsList,
+          value: addonsList || [],
           updated_at: new Date().toISOString(),
         });
       } catch (e) {}
     }
     try {
-      localStorage.setItem("abdullah_gym_addons", JSON.stringify(addonsList));
+      localStorage.setItem("abdullah_gym_addons", JSON.stringify(addonsList || []));
     } catch (e) {}
+  };
+
+  // Restore Default Initial Add-ons (Manual Only)
+  const handleRestoreDefaultAddons = async () => {
+    if (!confirm("Restore standard default add-on services into the database?")) return;
+    setLoadingAddons(true);
+    setAddons(initialAddons);
+    await saveAddonsToSupabase(initialAddons);
+    setAddonStatusMsg("✓ Restored default add-on plans into Supabase database.");
+    setLoadingAddons(false);
   };
 
   // Open modal for new Add-On
@@ -498,8 +568,9 @@ export default function AdminConfigurationPage() {
     if (!addonName.trim()) return;
 
     const numericPrice = parseFloat(addonPrice) || 0;
+    const addonId = editingAddon ? editingAddon.id : `addon-${Date.now()}`;
     const addonPayload = {
-      id: editingAddon ? editingAddon.id : `addon-${Date.now()}`,
+      id: addonId,
       name: addonName.trim(),
       price: numericPrice,
       icon: addonIcon.trim() || "🏃",
@@ -517,8 +588,68 @@ export default function AdminConfigurationPage() {
 
     setAddons(updated);
     await saveAddonsToSupabase(updated);
+
+    // Sync updated price across member_addons table and profiles in Supabase
+    if (isSupabaseConfigured() && editingAddon) {
+      try {
+        // 1. Update dedicated member_addons table
+        await supabase
+          .from("member_addons")
+          .update({ price: numericPrice, name: addonPayload.name })
+          .eq("addon_id", addonId);
+
+        // 2. Update profiles table where this addon is present in active_addons or plan
+        const { data: profs } = await supabase
+          .from("profiles")
+          .select("id, plan, active_addons");
+
+        if (profs && profs.length > 0) {
+          for (const member of profs) {
+            let hasAddon = false;
+            let memberAddons = [];
+
+            if (Array.isArray(member.active_addons)) {
+              memberAddons = member.active_addons;
+            } else if (typeof member.active_addons === "string" && member.active_addons.trim()) {
+              try {
+                memberAddons = JSON.parse(member.active_addons);
+              } catch (e) {}
+            }
+
+            if (Array.isArray(memberAddons) && memberAddons.length > 0) {
+              const updatedAddons = memberAddons.map((ma) => {
+                if (ma.id === addonId || ma.addon_id === addonId || (ma.name && ma.name.toLowerCase() === addonPayload.name.toLowerCase())) {
+                  hasAddon = true;
+                  return { ...ma, name: addonPayload.name, price: numericPrice, icon: addonPayload.icon };
+                }
+                return ma;
+              });
+
+              if (hasAddon) {
+                // Reconstruct plan string with updated addon pricing
+                let basePlan = String(member.plan || "").split(" [Add-ons:")[0];
+                const activeOnes = updatedAddons.filter((a) => a.status !== "Cancelled" && a.status !== "Expired");
+                let newPlanStr = basePlan;
+                if (activeOnes.length > 0) {
+                  const addonTitles = activeOnes.map((a) => `${a.name} (+PKR ${Number(a.price).toLocaleString()})`);
+                  newPlanStr = `${basePlan} [Add-ons: ${addonTitles.join(" + ")}]`;
+                }
+
+                await supabase
+                  .from("profiles")
+                  .update({ active_addons: updatedAddons, plan: newPlanStr, updated_at: new Date().toISOString() })
+                  .eq("id", member.id);
+              }
+            }
+          }
+        }
+      } catch (syncErr) {
+        console.warn("Notice syncing updated addon to members:", syncErr);
+      }
+    }
+
     setIsAddonModalOpen(false);
-    setAddonStatusMsg(`✓ Saved Add-On '${addonName}' directly to Supabase!`);
+    setAddonStatusMsg(`✓ Saved Add-On '${addonName}' and synchronized member profiles directly in Supabase!`);
     setTimeout(() => setAddonStatusMsg(""), 5000);
   };
 
@@ -589,76 +720,132 @@ export default function AdminConfigurationPage() {
       period: mPrice > 0 ? "per month" : "per day",
       features: featureArray,
       popular: editingPlan ? editingPlan.popular || false : false,
-      active: true,
+      active: editingPlan ? editingPlan.active : true,
       created_at: editingPlan ? editingPlan.created_at : new Date().toISOString(),
     };
 
+    let updated = [];
+    if (editingPlan) {
+      updated = plans.map((p) => (p.id === editingPlan.id ? { ...p, ...planPayload } : p));
+    } else {
+      updated = [...plans, planPayload];
+    }
+    setPlans(updated);
+    await savePlansToSupabase(updated);
+    setIsPlanModalOpen(false);
+    setPlanStatusMsg(`✓ Plan '${planName}' saved successfully to Supabase!`);
+    setTimeout(() => setPlanStatusMsg(""), 5000);
+  };
+
+  // Resolve member's exact assigned Plan ID by checking unique plan_id or matching against available plans
+  const getMemberAssignedPlanId = (member, allPlans = []) => {
+    if (!member) return null;
+
+    // 1. Direct plan_id if stored in member profile
+    if (member.plan_id) {
+      return String(member.plan_id).trim();
+    }
+
+    // 2. Resolve plan name against the active plans list by exact name or ID match
+    const rawMemberPlan = String(member.plan || "")
+      .split(" [Add-ons:")[0]
+      .split(" [Next:")[0]
+      .replace(/\s*\(pk[r|s][^)]*\)/gi, "")
+      .replace(/\s*\([^)]*\/mo\)/gi, "")
+      .replace(/\s*\([^)]*\/day\)/gi, "")
+      .trim();
+
+    if (!rawMemberPlan) return null;
+
+    // Direct match if member.plan is already a plan ID (e.g. 'plan-1')
+    const matchedById = (allPlans || []).find((p) => String(p.id).trim() === rawMemberPlan);
+    if (matchedById) return matchedById.id;
+
+    // Match by exact plan name
+    const matchedByName = (allPlans || []).find(
+      (p) => p.name && p.name.trim().toLowerCase() === rawMemberPlan.toLowerCase()
+    );
+    if (matchedByName) return matchedByName.id;
+
+    return null;
+  };
+
+  const handleDeletePlan = async (planId) => {
+    const targetPlan = plans.find((p) => p.id === planId);
+    if (!targetPlan) return;
+
+    // Query members and check using unique planId
+    let enrolledMembers = [];
     if (isSupabaseConfigured()) {
       try {
-        await supabase.from("gym_plans").upsert(planPayload, { onConflict: "id" });
-        await fetchPlans();
-      } catch (err) {
-        console.error("Plan save exception:", err);
+        const { data: profData } = await supabase
+          .from("profiles")
+          .select("id, full_name, member_id, plan, plan_id, status");
+
+        if (profData && profData.length > 0) {
+          enrolledMembers = profData.filter((m) => {
+            const memberPlanId = getMemberAssignedPlanId(m, plans);
+            return memberPlanId === planId;
+          });
+        }
+      } catch (e) {
+        console.warn("Check plan usage notice:", e);
       }
-    } else {
-      let updated = [];
-      if (editingPlan) {
-        updated = plans.map((p) => (p.id === editingPlan.id ? { ...p, ...planPayload } : p));
-      } else {
-        updated = [...plans, planPayload];
-      }
-      setPlans(updated);
+    }
+
+    if (enrolledMembers.length === 0) {
       try {
-        localStorage.setItem("abdullah_gym_plans", JSON.stringify(updated));
+        const savedMembers = localStorage.getItem("abdullah_gym_members");
+        if (savedMembers) {
+          const parsed = JSON.parse(savedMembers);
+          enrolledMembers = parsed.filter((m) => {
+            const memberPlanId = getMemberAssignedPlanId(m, plans);
+            return memberPlanId === planId;
+          });
+        }
       } catch (e) {}
     }
 
-    setIsPlanModalOpen(false);
-  };
+    // If members are currently enrolled in this unique plan ID, block deletion and display custom alert
+    if (enrolledMembers.length > 0) {
+      const sampleNames = enrolledMembers
+        .slice(0, 3)
+        .map((m) => m.full_name || m.member_id || "Member")
+        .join(", ");
+      const moreText = enrolledMembers.length > 3 ? ` and ${enrolledMembers.length - 3} others` : "";
 
-  const handleDeletePlan = (planId) => {
+      showDialog({
+        type: "warning",
+        title: "Cannot Delete Active Plan",
+        message: `Plan "${targetPlan.name}" (ID: ${planId}) is currently active and assigned to ${enrolledMembers.length} member(s) (${sampleNames}${moreText}).\n\nYou cannot delete this plan while members are actively enrolled in it. Please reassign those members to another plan in the Members section before deleting this plan.`,
+        confirmText: "Understood",
+        cancelText: null,
+      });
+      return;
+    }
+
+    // No members are on this plan - proceed with confirmation dialog
+    // No members are on this plan - proceed with confirmation dialog
     showDialog({
       type: "danger",
       title: "Delete Membership Plan",
-      message: "Are you sure you want to delete this membership plan from Supabase?",
+      message: `Are you sure you want to delete "${targetPlan.name}" from Supabase? This action cannot be undone.`,
       confirmText: "Delete Plan",
       cancelText: "Cancel",
       onConfirm: async () => {
-        if (isSupabaseConfigured()) {
-          try {
-            await supabase.from("gym_plans").delete().eq("id", planId);
-            await fetchPlans();
-          } catch (e) {
-            console.error("Delete plan error:", e);
-          }
-        } else {
-          const updated = plans.filter((p) => p.id !== planId);
-          setPlans(updated);
-          try {
-            localStorage.setItem("abdullah_gym_plans", JSON.stringify(updated));
-          } catch (e) {}
-        }
+        const updated = plans.filter((p) => p.id !== planId);
+        setPlans(updated);
+        await savePlansToSupabase(updated, planId);
+        setPlanStatusMsg(`✓ Plan '${targetPlan.name}' deleted successfully.`);
+        setTimeout(() => setPlanStatusMsg(""), 5000);
       },
     });
   };
 
   const handleTogglePlanActive = async (planId) => {
-    const target = plans.find((p) => p.id === planId);
-    if (!target) return;
-    const nextState = !target.active;
-
-    if (isSupabaseConfigured()) {
-      try {
-        await supabase.from("gym_plans").update({ active: nextState }).eq("id", planId);
-        await fetchPlans();
-      } catch (e) {}
-    } else {
-      const updated = plans.map((p) => (p.id === planId ? { ...p, active: nextState } : p));
-      setPlans(updated);
-      try {
-        localStorage.setItem("abdullah_gym_plans", JSON.stringify(updated));
-      } catch (e) {}
-    }
+    const updated = plans.map((p) => (p.id === planId ? { ...p, active: !p.active } : p));
+    setPlans(updated);
+    await savePlansToSupabase(updated);
   };
 
 
@@ -862,21 +1049,39 @@ export default function AdminConfigurationPage() {
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
                 <h2 className="text-base font-extrabold text-slate-900">Gym Base Membership Plans</h2>
+                <p className="text-xs text-slate-500 mt-0.5">Configure live membership tiers, fees, and features.</p>
               </div>
-              <button
-                onClick={handleOpenAddModal}
-                className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl transition flex items-center gap-2 self-start sm:self-auto shadow-xs cursor-pointer"
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
-                </svg>
-                + Create New Plan
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleRestoreDefaultPlans}
+                  className="px-3.5 py-2 bg-white hover:bg-slate-50 text-slate-700 font-bold text-xs rounded-xl border border-slate-200 hover:border-slate-300 transition flex items-center gap-1.5 shadow-2xs cursor-pointer"
+                  title="Restore default standard membership tiers into database"
+                >
+                  <span>🌱</span>
+                  <span>Restore Defaults</span>
+                </button>
+                <button
+                  onClick={handleOpenAddModal}
+                  className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl transition flex items-center gap-2 self-start sm:self-auto shadow-xs cursor-pointer"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
+                  </svg>
+                  + Create New Plan
+                </button>
+              </div>
             </div>
 
             {/* Grid of Base Plans */}
             {loadingPlans ? (
               <div className="py-12 text-center text-xs text-slate-400">Loading plans from Supabase...</div>
+            ) : plans.length === 0 ? (
+              <div className="py-12 px-4 bg-slate-50 border border-dashed border-slate-200 rounded-2xl text-center space-y-2">
+                <p className="text-sm font-extrabold text-slate-700">No membership plans in database</p>
+                <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                  All plans have been deleted. You can create custom plans or click "Restore Defaults" above.
+                </p>
+              </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
                 {plans.map((p) => {
@@ -915,54 +1120,46 @@ export default function AdminConfigurationPage() {
                           </button>
                         </div>
 
-                        <h3 className="text-base font-black text-slate-900">{p.name}</h3>
-
-                        {/* Monthly & Daily Rates */}
-                        <div className="my-4 p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1.5">
-                          <div className="flex items-center justify-between text-xs">
-                            <span className="text-slate-500 font-medium">Monthly Rate:</span>
-                            <span className="font-extrabold text-slate-900 text-sm">
-                              PKR {Number(monthlyVal).toLocaleString()} <span className="text-[10px] text-slate-500 font-normal">/mo</span>
-                            </span>
-                          </div>
-                          <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-200">
-                            <span className="text-slate-500 font-medium">Daily Pass Rate:</span>
-                            <span className="font-bold text-emerald-700 text-xs">
-                              PKR {Number(dailyVal).toLocaleString()} <span className="text-[10px] text-slate-500 font-normal">/day</span>
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* Features */}
-                        <ul className="space-y-2 mb-6">
-                          {(p.features || []).map((feat, idx) => (
-                            <li key={idx} className="text-xs text-slate-600 flex items-start gap-2">
-                              <svg className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                              </svg>
-                              <span>{feat}</span>
-                            </li>
-                          ))}
-                        </ul>
+                        <h3 className="font-extrabold text-slate-900 text-base">{p.name}</h3>
+                        <p className="text-xs text-slate-500 mt-1 line-clamp-2">{p.features || "Full gym access"}</p>
                       </div>
 
-                      {/* Actions */}
-                      <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
-                        <button
-                          onClick={() => handleOpenEditModal(p)}
-                          className="flex-1 py-1.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-xs font-bold text-slate-900 rounded-lg transition"
-                        >
-                          Edit Pricing
-                        </button>
-                        <button
-                          onClick={() => handleDeletePlan(p.id)}
-                          title="Delete Plan from Supabase"
-                          className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition"
-                        >
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                          </svg>
-                        </button>
+                      <div className="space-y-4 pt-4 border-t border-slate-100 mt-4">
+                        <div>
+                          {monthlyVal > 0 ? (
+                            <div className="flex items-baseline gap-1">
+                              <span className="font-black text-slate-900 text-xl font-mono">
+                                PKR {Number(monthlyVal).toLocaleString()}
+                              </span>
+                              <span className="text-slate-400 text-xs font-semibold">/month</span>
+                            </div>
+                          ) : (
+                            <div className="flex items-baseline gap-1">
+                              <span className="font-black text-slate-900 text-xl font-mono">
+                                PKR {Number(dailyVal).toLocaleString()}
+                              </span>
+                              <span className="text-slate-400 text-xs font-semibold">/day</span>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => handleOpenEditModal(p)}
+                            className="flex-1 py-1.5 bg-slate-100 hover:bg-slate-200 text-xs font-bold text-slate-700 rounded-lg transition"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => handleDeletePlan(p.id)}
+                            className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition"
+                            title="Delete plan"
+                          >
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                          </button>
+                        </div>
                       </div>
                     </div>
                   );
@@ -972,23 +1169,31 @@ export default function AdminConfigurationPage() {
           </div>
 
           {/* DYNAMIC ADD-ON SERVICES SECTION */}
-          <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-5">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+          <div className="space-y-4 pt-6 border-t border-slate-200">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
-                <h3 className="text-base font-extrabold text-slate-900">
-                  Stackable Add-On Services
-                </h3>
+                <h2 className="text-base font-extrabold text-slate-900">Add-On Services & Facility Pricing</h2>
+                <p className="text-xs text-slate-500 mt-0.5">Manage optional service add-ons available for registration and upgrades.</p>
               </div>
-
-              <button
-                onClick={handleOpenAddAddonModal}
-                className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl transition shadow-xs flex items-center gap-2 shrink-0 cursor-pointer"
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
-                </svg>
-                + Add New Add-On
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleRestoreDefaultAddons}
+                  className="px-3.5 py-2 bg-white hover:bg-slate-50 text-slate-700 font-bold text-xs rounded-xl border border-slate-200 hover:border-slate-300 transition flex items-center gap-1.5 shadow-2xs cursor-pointer"
+                  title="Restore default add-on facilities into database"
+                >
+                  <span>🌱</span>
+                  <span>Restore Defaults</span>
+                </button>
+                <button
+                  onClick={handleOpenAddAddonModal}
+                  className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl transition shadow-xs flex items-center gap-2 shrink-0 cursor-pointer"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
+                  </svg>
+                  + Add New Add-On
+                </button>
+              </div>
             </div>
 
             {/* Grid of Dynamic Add-Ons */}
@@ -1657,6 +1862,9 @@ export default function AdminConfigurationPage() {
         isLoading={detectingGps}
         message="Detecting GPS Coordinates..."
       />
+
+      {/* CUSTOM CONFIRMATION & ALERT DIALOG MODAL */}
+      <CustomDialogModal {...dialogConfig} />
     </div>
   );
 }

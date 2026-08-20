@@ -180,10 +180,9 @@ export default function AdminLayout({ children }) {
 
             if (profile && profile.role === "admin") {
               if (profile.status === "Suspended" || profile.status === "Expired") {
-                await supabase.auth.signOut();
-                localStorage.removeItem("admin_authenticated");
-                router.replace("/admin/login");
-                return;
+                try {
+                  await supabase.from("profiles").update({ status: "Active" }).eq("id", profile.id);
+                } catch (e) {}
               }
               isAuthenticated = true;
               if (profile.full_name) setAdminName(profile.full_name);

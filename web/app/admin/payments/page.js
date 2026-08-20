@@ -55,9 +55,8 @@ function StatusBadge({ status }) {
 
   return (
     <span
-      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
-        styles[key] || styles.Unpaid
-      }`}
+      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${styles[key] || styles.Unpaid
+        }`}
     >
       {labels[key] || labels.Unpaid}
     </span>
@@ -73,6 +72,7 @@ export default function PaymentsAdminPage() {
   const [payments, setPayments] = useState([]);
   const [members, setMembers] = useState([]);
   const [availablePlans, setAvailablePlans] = useState([]);
+  const [availableAddons, setAvailableAddons] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
@@ -93,20 +93,106 @@ export default function PaymentsAdminPage() {
   const [activeProof, setActiveProof] = useState(null);
 
   useEffect(() => {
-    fetchPaymentsAndMembers();
+    fetchPaymentsAndMembers(false);
+
+    // 1. Supabase Realtime subscription (Instant sync on payment proof submissions & approvals)
+    let paymentsChannel = null;
+    if (isSupabaseConfigured()) {
+      paymentsChannel = supabase
+        .channel("admin-payments-realtime-sync")
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "payments" },
+          () => {
+            fetchPaymentsAndMembers(true);
+          }
+        )
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "profiles" },
+          () => {
+            fetchPaymentsAndMembers(true);
+          }
+        )
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "member_addons" },
+          () => {
+            fetchPaymentsAndMembers(true);
+          }
+        )
+        .subscribe();
+    }
+
+    // 2. Silent auto-poll fallback (every 5 seconds) without flickering or reloading the table
+    const pollTimer = setInterval(() => {
+      fetchPaymentsAndMembers(true);
+    }, 5000);
+
+    return () => {
+      if (paymentsChannel) supabase.removeChannel(paymentsChannel);
+      clearInterval(pollTimer);
+    };
   }, []);
 
-  const fetchPaymentsAndMembers = async () => {
-    setLoading(true);
+  const fetchPaymentsAndMembers = async (isSilent = false) => {
+    if (!isSilent) setLoading(true);
     let loadedFromSupabase = false;
 
     if (isSupabaseConfigured()) {
       try {
+        let fetchedPlans = [];
         const { data: planData } = await supabase
           .from("gym_plans")
           .select("*")
           .eq("active", true);
-        if (planData) setAvailablePlans(planData);
+        if (planData && planData.length > 0) {
+          fetchedPlans = planData;
+        } else {
+          const { data: setObj } = await supabase
+            .from("gym_settings")
+            .select("value")
+            .eq("key", "gym_plans")
+            .maybeSingle();
+          if (setObj?.value && Array.isArray(setObj.value)) {
+            fetchedPlans = setObj.value.filter((p) => p.active !== false);
+          }
+        }
+        if (fetchedPlans.length === 0) {
+          try {
+            const saved = localStorage.getItem("abdullah_gym_plans");
+            if (saved) fetchedPlans = JSON.parse(saved).filter((p) => p.active !== false);
+          } catch (e) { }
+        }
+        if (fetchedPlans.length > 0) setAvailablePlans(fetchedPlans);
+
+        let fetchedAddons = [];
+        try {
+          const { data: addonData } = await supabase
+            .from("gym_addons")
+            .select("*")
+            .eq("active", true);
+          if (addonData && addonData.length > 0) {
+            fetchedAddons = addonData;
+          } else {
+            const { data: setAddon } = await supabase
+              .from("gym_settings")
+              .select("value")
+              .eq("key", "gym_addons")
+              .maybeSingle();
+            if (setAddon?.value && Array.isArray(setAddon.value)) {
+              fetchedAddons = setAddon.value.filter((a) => a.active !== false);
+            }
+          }
+        } catch (e) {}
+
+        if (fetchedAddons.length === 0) {
+          try {
+            const saved = localStorage.getItem("abdullah_gym_addons");
+            if (saved) fetchedAddons = JSON.parse(saved).filter((a) => a.active !== false);
+          } catch (e) {}
+        }
+        if (fetchedAddons.length > 0) setAvailableAddons(fetchedAddons);
 
         const { data: profData } = await supabase
           .from("profiles")
@@ -125,7 +211,7 @@ export default function PaymentsAdminPage() {
           profData.forEach((p) => profileMap.set(p.id, p));
         }
 
-        const { data: payData, error } = await supabase
+        const { data: payData } = await supabase
           .from("payments")
           .select("*")
           .order("date", { ascending: false });
@@ -139,7 +225,10 @@ export default function PaymentsAdminPage() {
           if (aData) addonPayData = aData;
         } catch (e) {}
 
-        const formattedGym = (!error && payData ? payData : []).map((item) => {
+        const activeAddonsList = fetchedAddons.length > 0 ? fetchedAddons : availableAddons;
+        const activePlansList = fetchedPlans.length > 0 ? fetchedPlans : availablePlans;
+
+        const formattedGym = (payData || []).map((item) => {
           const prof = profileMap.get(item.user_id);
           const isWalkIn =
             item.invoice_id?.startsWith("INV-WALK") ||
@@ -150,43 +239,51 @@ export default function PaymentsAdminPage() {
             item.payment_method?.toLowerCase().includes("walk-in");
 
           let amt = parseFloat(item.amount) || 0;
-          const cleanProfPlan = (prof?.plan || "Pro Membership").split(" [Add-ons:")[0].split(" [Next:")[0];
-          const matchedPlan = (planData || availablePlans || []).find(
+          let tFee = parseFloat(item.total_fee) || amt;
+
+          const cleanProfPlan = (item.item_name || prof?.plan || "Standard Monthly Pass").split(" [Add-ons:")[0].split(" [Next:")[0];
+          const matchedPlan = (activePlansList || []).find(
             (p) =>
               p.name.toLowerCase() === cleanProfPlan.toLowerCase() ||
               cleanProfPlan.toLowerCase().includes(p.name.toLowerCase())
           );
 
-          let tFee = 5000;
+          let displayPlan = cleanProfPlan;
           if (isWalkIn) {
             tFee = amt > 0 ? amt : 500;
             amt = tFee;
+            displayPlan = "Daily Walk-In Pass";
           } else {
-            if (item.total_fee && parseFloat(item.total_fee) > 0) {
-              tFee = parseFloat(item.total_fee);
-            } else if (matchedPlan) {
-              tFee = parseFloat(matchedPlan.monthly_price || matchedPlan.monthlyPrice) || 5000;
-            }
-
-            if (amt <= 0) {
-              amt = parseFloat(prof?.fee_paid) || tFee;
-            }
+            const livePlanPrice = matchedPlan ? Number(matchedPlan.monthly_price || matchedPlan.monthlyPrice) : 3500;
+            if (tFee <= 0) tFee = livePlanPrice;
+            if (amt <= 0) amt = parseFloat(prof?.fee_paid) || tFee;
+            displayPlan = matchedPlan?.name || cleanProfPlan;
           }
 
           let calculatedStatus = "Unpaid";
-          if (item.status === "Rejected") calculatedStatus = "Rejected";
-          else if (item.status === "Pending Approval" || item.proof_url) calculatedStatus = "Pending Approval";
-          else if (item.status === "Paid" || amt > 0 || isWalkIn) calculatedStatus = "Paid";
-          else calculatedStatus = "Unpaid";
+          if (item.status === "Rejected") {
+            calculatedStatus = "Rejected";
+          } else if (
+            item.status === "Pending Approval" ||
+            item.status === "Pending" ||
+            (item.status && String(item.status).toLowerCase().includes("pending")) ||
+            item.proof_url
+          ) {
+            calculatedStatus = "Pending Approval";
+          } else if (item.status === "Paid" || isWalkIn || amt > 0) {
+            calculatedStatus = "Paid";
+          } else {
+            calculatedStatus = "Unpaid";
+          }
 
           return {
             id: item.id,
             user_id: item.user_id,
             is_addon: false,
-            invoice_id: item.invoice_id || `INV-${item.id.slice(0, 4)}`,
+            invoice_id: item.invoice_id || `INV-${item.id?.slice(0, 4)}`,
             member_name: prof?.full_name || item.member_name || "Gym Member",
             member_id: prof?.member_id || (isWalkIn ? "GP-WALK-GUEST" : "GP-MEMBER"),
-            plan: isWalkIn ? "Daily Walk-In Pass" : cleanProfPlan,
+            plan: displayPlan,
             raw_amount: amt,
             raw_total_fee: tFee,
             amount: `PKR ${Number(amt).toLocaleString()}`,
@@ -205,26 +302,47 @@ export default function PaymentsAdminPage() {
           };
         });
 
-        const formattedAddon = addonPayData.map((item) => {
+        const formattedAddon = (addonPayData || []).map((item) => {
           const prof = profileMap.get(item.user_id);
-          let amt = parseFloat(item.amount) || 1500;
+          const cleanAddonName = (item.addon_name || item.item_name || item.name || "Cardio Access").replace(/\(Add-on\)/gi, "").trim();
+          const matchedAddon = (activeAddonsList || []).find(
+            (a) =>
+              (item.addon_id && a.id === item.addon_id) ||
+              (a.name && cleanAddonName && a.name.toLowerCase().includes(cleanAddonName.toLowerCase()))
+          );
+          let amt = parseFloat(item.amount) || (matchedAddon ? Number(matchedAddon.price) : 1500);
+          const liveAddonPrice = matchedAddon ? Number(matchedAddon.price) : amt;
+
           let calculatedStatus = "Unpaid";
-          if (item.status === "Rejected") calculatedStatus = "Rejected";
-          else if (item.status === "Pending Approval" || item.proof_url) calculatedStatus = "Pending Approval";
-          else if (item.status === "Paid") calculatedStatus = "Paid";
+          if (item.status === "Rejected") {
+            calculatedStatus = "Rejected";
+          } else if (
+            item.status === "Pending Approval" ||
+            item.status === "Pending" ||
+            (item.status && String(item.status).toLowerCase().includes("pending")) ||
+            item.proof_url
+          ) {
+            calculatedStatus = "Pending Approval";
+          } else if (item.status === "Paid") {
+            calculatedStatus = "Paid";
+          } else {
+            calculatedStatus = "Unpaid";
+          }
 
           return {
             id: item.id,
             user_id: item.user_id,
+            addon_id: item.addon_id || matchedAddon?.id || null,
+            addon_name: matchedAddon?.name || cleanAddonName,
             is_addon: true,
-            invoice_id: item.invoice_id || `INV-ADD-${item.id.slice(0, 4)}`,
+            invoice_id: item.invoice_id || `INV-ADD-${item.id?.slice(0, 4)}`,
             member_name: prof?.full_name || "Gym Member",
             member_id: prof?.member_id || "GP-MEMBER",
-            plan: `${item.addon_name || "Cardio Access Pass"} (Add-on)`,
+            plan: `${matchedAddon?.name || cleanAddonName} (Add-on)`,
             raw_amount: amt,
-            raw_total_fee: amt,
+            raw_total_fee: liveAddonPrice,
             amount: `PKR ${Number(amt).toLocaleString()}`,
-            total_fee: `PKR ${Number(amt).toLocaleString()}`,
+            total_fee: `PKR ${Number(liveAddonPrice).toLocaleString()}`,
             date: item.date
               ? new Date(item.date).toLocaleDateString([], {
                 month: "short",
@@ -239,7 +357,11 @@ export default function PaymentsAdminPage() {
           };
         });
 
-        setPayments([...formattedGym, ...formattedAddon]);
+        const allPaymentsCombined = [...formattedGym, ...formattedAddon].sort(
+          (a, b) => new Date(b.date || 0) - new Date(a.date || 0)
+        );
+
+        setPayments(allPaymentsCombined);
         loadedFromSupabase = true;
       } catch (err) {
         console.warn("Supabase payments fetch exception:", err);
@@ -307,85 +429,127 @@ export default function PaymentsAdminPage() {
           }
         }
 
+        // 1. Approve payment record in both payments and addon_payments tables
+        if (targetPaymentId) {
+          await Promise.allSettled([
+            supabase.from("payments").update({ status: "Paid", proof_url: null }).eq("id", targetPaymentId),
+            supabase.from("addon_payments").update({ status: "Paid", proof_url: null }).eq("id", targetPaymentId),
+          ]);
+        }
+
         if (isAddonPayment) {
-          // 1. Approve Add-on payment in addon_payments table ONLY
-          await supabase
-            .from("addon_payments")
-            .update({ status: "Paid", proof_url: null })
-            .eq("id", targetPaymentId);
+          const targetAddonId = matchingItem?.addon_id || matchingItem?.addonId;
+          const rawAddonName = matchingItem?.addon_name || matchingItem?.item_name || matchingItem?.plan || "Cardio Access";
+          const cleanAddonName = rawAddonName.replace(/\(Add-on\)/gi, "").trim();
 
-          // 2. Fetch existing member_addons & profile to check unexpired remaining days
-          const { data: existingMemberAddon } = await supabase
+          // 2. Fetch specific member_addon row for this user
+          const { data: userAddonsList } = await supabase
             .from("member_addons")
-            .select("start_date, expiry_date, days_remaining")
-            .eq("user_id", targetUserId)
-            .maybeSingle();
+            .select("*")
+            .eq("user_id", targetUserId);
 
+          const matchedMemberAddon = (userAddonsList || []).find((ma) => {
+            if (targetAddonId && (ma.addon_id === targetAddonId || ma.id === targetAddonId)) return true;
+            if (ma.name && cleanAddonName && (ma.name.toLowerCase().includes(cleanAddonName.toLowerCase()) || cleanAddonName.toLowerCase().includes(ma.name.toLowerCase()))) return true;
+            return false;
+          });
+
+          // 3. Fetch profile active_addons
           const { data: userProf } = await supabase
             .from("profiles")
             .select("active_addons")
             .eq("id", targetUserId)
             .maybeSingle();
 
-          let existingAddons = Array.isArray(userProf?.active_addons) ? [...userProf.active_addons] : [];
-          const cardioIdx = existingAddons.findIndex((a) => a.name?.toLowerCase().includes("cardio") || a.id === "addon-1" || a.addon_id === "addon-1");
-          const existingAddonObj = cardioIdx >= 0 ? existingAddons[cardioIdx] : null;
+          let existingAddons = [];
+          if (Array.isArray(userProf?.active_addons)) {
+            existingAddons = [...userProf.active_addons];
+          } else if (typeof userProf?.active_addons === "string" && userProf.active_addons.trim()) {
+            try {
+              existingAddons = JSON.parse(userProf.active_addons);
+            } catch (e) {}
+          }
 
-          const currentExpiryStr = existingMemberAddon?.expiry_date || existingAddonObj?.expiry_date;
+          const matchedProfileAddonIdx = existingAddons.findIndex((a) => {
+            if (targetAddonId && (a.id === targetAddonId || a.addon_id === targetAddonId)) return true;
+            if (a.name && cleanAddonName && (a.name.toLowerCase().includes(cleanAddonName.toLowerCase()) || cleanAddonName.toLowerCase().includes(a.name.toLowerCase()))) return true;
+            return false;
+          });
+
+          const currentExpiryStr = matchedMemberAddon?.expiry_date || (matchedProfileAddonIdx >= 0 ? existingAddons[matchedProfileAddonIdx].expiry_date : null);
           const currentExpiry = currentExpiryStr ? new Date(currentExpiryStr) : null;
+          // Check if current add-on is still unexpired (days remaining > 0)
           const isCurrentlyActive = currentExpiry && currentExpiry.getTime() > Date.now();
 
-          // If current cycle still has days remaining (e.g. 5 days), stack +30 days on top of existing expiry (5 + 30 = 35 days)
+          // If expired (or not found), start FRESH 30 days from NOW (30 days remaining)!
+          // Only if unexpired with days left, add 30 days onto remaining expiry
           const baseTime = isCurrentlyActive ? currentExpiry.getTime() : Date.now();
           const newExpiryDate = new Date(baseTime + 30 * 86400000);
           const newExpiry = newExpiryDate.toISOString();
           const totalDaysRemaining = Math.max(1, Math.ceil((newExpiryDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24)));
-          const originalStartDate = existingMemberAddon?.start_date || existingAddonObj?.start_date || new Date().toISOString();
+          const originalStartDate = matchedMemberAddon?.start_date || (matchedProfileAddonIdx >= 0 ? existingAddons[matchedProfileAddonIdx].start_date : new Date().toISOString());
 
-          try {
+          // Update ONLY this specific add-on in member_addons table (never touch other add-ons!)
+          if (matchedMemberAddon?.id) {
             await supabase
               .from("member_addons")
               .update({
-                start_date: originalStartDate,
+                start_date: isCurrentlyActive ? originalStartDate : new Date().toISOString(),
                 expiry_date: newExpiry,
                 days_remaining: totalDaysRemaining,
                 status: "Active",
                 updated_at: new Date().toISOString(),
               })
-              .eq("user_id", targetUserId);
-          } catch (e) {}
+              .eq("id", matchedMemberAddon.id);
+          } else {
+            await supabase
+              .from("member_addons")
+              .insert([
+                {
+                  user_id: targetUserId,
+                  addon_id: targetAddonId || "addon-1",
+                  name: cleanAddonName,
+                  price: parseFloat(matchingItem?.amount?.replace(/[^\d.]/g, "")) || 1500,
+                  start_date: new Date().toISOString(),
+                  expiry_date: newExpiry,
+                  days_remaining: totalDaysRemaining,
+                  status: "Active",
+                },
+              ]);
+          }
 
           const updatedAddonRecord = {
-            id: existingAddonObj?.id || "addon-1",
-            addon_id: existingAddonObj?.addon_id || "addon-1",
-            name: existingAddonObj?.name || "Cardio Access Plan",
-            price: existingAddonObj?.price || 1500,
-            icon: existingAddonObj?.icon || "🏃",
-            start_date: originalStartDate,
+            id: targetAddonId || matchedMemberAddon?.addon_id || "addon-1",
+            addon_id: targetAddonId || matchedMemberAddon?.addon_id || "addon-1",
+            name: cleanAddonName,
+            price: parseFloat(matchingItem?.amount?.replace(/[^\d.]/g, "")) || 1500,
+            icon: cleanAddonName.toLowerCase().includes("cardio") ? "🏃" : cleanAddonName.toLowerCase().includes("trainer") ? "🏋️" : cleanAddonName.toLowerCase().includes("sauna") ? "♨️" : "✨",
+            start_date: isCurrentlyActive ? originalStartDate : new Date().toISOString(),
             expiry_date: newExpiry,
             days_remaining: totalDaysRemaining,
             status: "Active",
           };
 
-          if (cardioIdx >= 0) {
-            existingAddons[cardioIdx] = updatedAddonRecord;
+          if (matchedProfileAddonIdx >= 0) {
+            existingAddons[matchedProfileAddonIdx] = updatedAddonRecord;
           } else {
             existingAddons.push(updatedAddonRecord);
           }
+
           await supabase.from("profiles").update({ active_addons: existingAddons }).eq("id", targetUserId);
 
           try {
             await supabase.from("notifications").insert([
               {
                 user_id: targetUserId,
-                title: "Cardio Pass Renewed! 🏃",
-                message: `Your Cardio Access payment was verified! +30 days added on top of remaining days. Total: ${totalDaysRemaining} days active!`,
+                title: `${cleanAddonName} Pass Renewed! 🚀`,
+                message: `Your ${cleanAddonName} payment was verified! +30 days added. Total: ${totalDaysRemaining} days active!`,
                 type: "payment_approved",
                 action: "VIEW_PAYMENT",
                 created_at: new Date().toISOString(),
               },
             ]);
-          } catch (notifErr) {}
+          } catch (notifErr) { }
         } else {
           // 2. Approve Monthly Gym Plan payment in payments table
           if (targetPaymentId) {
@@ -398,11 +562,19 @@ export default function PaymentsAdminPage() {
           if (targetUserId) {
             const { data: userProf } = await supabase
               .from("profiles")
-              .select("upcoming_plan, next_plan, plan, full_name")
+              .select("upcoming_plan, next_plan, plan, full_name, days_remaining")
               .eq("id", targetUserId)
               .maybeSingle();
 
-            const profileUpdates = { status: "Active" };
+            const currentDaysRemaining = userProf?.days_remaining ? Number(userProf.days_remaining) : 0;
+            const newDaysRemaining = currentDaysRemaining > 0 ? currentDaysRemaining + 30 : 30;
+
+            const profileUpdates = {
+              status: "Active",
+              days_remaining: newDaysRemaining,
+              updated_at: new Date().toISOString(),
+            };
+
             let finalPlan = (userProf?.plan || "Pro Membership").split(" [Add-ons:")[0];
             if (userProf?.upcoming_plan || userProf?.next_plan) {
               finalPlan = (userProf.upcoming_plan || userProf.next_plan).split(" [Add-ons:")[0];
@@ -424,7 +596,7 @@ export default function PaymentsAdminPage() {
                   created_at: new Date().toISOString(),
                 },
               ]);
-            } catch (notifErr) {}
+            } catch (notifErr) { }
           }
         }
 
@@ -477,19 +649,18 @@ export default function PaymentsAdminPage() {
           }
         }
 
-        // Update ONLY this single targeted payment record
+        // Update targeted payment record in both tables
         if (targetPaymentId) {
-          await supabase
-            .from("payments")
-            .update({ status: "Rejected", proof_url: null })
-            .eq("id", targetPaymentId);
+          await Promise.allSettled([
+            supabase.from("payments").update({ status: "Rejected", proof_url: null }).eq("id", targetPaymentId),
+            supabase.from("addon_payments").update({ status: "Rejected", proof_url: null }).eq("id", targetPaymentId),
+          ]);
         } else {
           // Fallback: update only pending approval payments for this user
-          await supabase
-            .from("payments")
-            .update({ status: "Rejected", proof_url: null })
-            .eq("user_id", targetUserId)
-            .eq("status", "Pending Approval");
+          await Promise.allSettled([
+            supabase.from("payments").update({ status: "Rejected", proof_url: null }).eq("user_id", targetUserId).eq("status", "Pending Approval"),
+            supabase.from("addon_payments").update({ status: "Rejected", proof_url: null }).eq("user_id", targetUserId).eq("status", "Pending Approval"),
+          ]);
         }
 
         // Insert notification for member about rejection
@@ -603,7 +774,25 @@ export default function PaymentsAdminPage() {
         ]);
 
         if (finalStatus === "Paid") {
-          await supabase.from("profiles").update({ status: "Active" }).eq("id", targetUserId);
+          if (!isWalkInPayment) {
+            const { data: targetProf } = await supabase
+              .from("profiles")
+              .select("days_remaining")
+              .eq("id", targetUserId)
+              .maybeSingle();
+            const currDays = targetProf?.days_remaining ? Number(targetProf.days_remaining) : 0;
+            const updatedDays = currDays > 0 ? currDays + 30 : 30;
+            await supabase
+              .from("profiles")
+              .update({
+                status: "Active",
+                days_remaining: updatedDays,
+                updated_at: new Date().toISOString(),
+              })
+              .eq("id", targetUserId);
+          } else {
+            await supabase.from("profiles").update({ status: "Active" }).eq("id", targetUserId);
+          }
         }
 
         await fetchPaymentsAndMembers();
@@ -687,12 +876,12 @@ export default function PaymentsAdminPage() {
   const getMemberPaymentInfo = (memberId) => {
     const member = members.find((m) => m.id === memberId);
     const cleanPlan = (member?.plan || "Standard Membership").split(" [Add-ons:")[0];
-    
+
     let basePlanFee = (member?.fee_paid && Number(member.fee_paid) > 0)
       ? Number(member.fee_paid)
       : (member?.total_fee && Number(member.total_fee) > 0)
-      ? Number(member.total_fee)
-      : resolveBasePlanFee(cleanPlan);
+        ? Number(member.total_fee)
+        : resolveBasePlanFee(cleanPlan);
 
     const userPayments = payments.filter((p) => p.user_id === memberId);
     const gymPayments = userPayments.filter((p) => !p.is_addon);
@@ -888,17 +1077,15 @@ export default function PaymentsAdminPage() {
                 setActiveTab("logs");
                 setStatusFilter("All");
               }}
-              className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${
-                activeTab === "logs" ? "bg-white text-slate-900 shadow-xs" : "text-slate-500 hover:text-slate-800"
-              }`}
+              className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${activeTab === "logs" ? "bg-white text-slate-900 shadow-xs" : "text-slate-500 hover:text-slate-800"
+                }`}
             >
               Transactions ({payments.length})
             </button>
             <button
               onClick={() => setActiveTab("members")}
-              className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                activeTab === "members" ? "bg-white text-slate-900 shadow-xs" : "text-slate-500 hover:text-slate-800"
-              }`}
+              className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${activeTab === "members" ? "bg-white text-slate-900 shadow-xs" : "text-slate-500 hover:text-slate-800"
+                }`}
             >
               Member Fees ({members.length})
               {pendingApprovalsCount > 0 && (
@@ -932,11 +1119,10 @@ export default function PaymentsAdminPage() {
             <button
               key={st.key}
               onClick={() => setStatusFilter(st.key)}
-              className={`px-3 py-1 rounded-lg text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
-                statusFilter === st.key
-                  ? "bg-white text-slate-900 shadow-xs border border-slate-200"
-                  : "text-slate-500 hover:text-slate-800"
-              }`}
+              className={`px-3 py-1 rounded-lg text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${statusFilter === st.key
+                ? "bg-white text-slate-900 shadow-xs border border-slate-200"
+                : "text-slate-500 hover:text-slate-800"
+                }`}
             >
               {st.label}
             </button>
@@ -991,13 +1177,95 @@ export default function PaymentsAdminPage() {
                         <StatusBadge status={p.status} />
                       </td>
                       <td className="py-3.5 px-4 text-right">
-                        {p.status === "Paid" ? (
+                        {p.status === "Pending Approval" ? (
+                          <div className="flex items-center justify-end gap-1.5">
+                            {p.proof_url && (
+                              <button
+                                onClick={() =>
+                                  setActiveProof({
+                                    member: { id: p.user_id, full_name: p.member_name },
+                                    info: {
+                                      proof_url: p.proof_url,
+                                      payment_id: p.id,
+                                      total_fee: p.raw_total_fee || p.raw_amount,
+                                      is_pending_addon: p.is_addon,
+                                      pending_item_name: p.plan,
+                                    },
+                                  })
+                                }
+                                className="px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-[11px] font-bold rounded-lg border border-indigo-200 transition cursor-pointer"
+                                title="View submitted proof screenshot"
+                              >
+                                🖼️ Proof
+                              </button>
+                            )}
+                            <button
+                              onClick={() =>
+                                handleApprovePayment(
+                                  {
+                                    id: p.user_id,
+                                    full_name: p.member_name,
+                                    payment_id: p.id,
+                                    is_addon: p.is_addon,
+                                    addon_id: p.addon_id,
+                                    addon_name: p.addon_name,
+                                    plan: p.plan,
+                                  },
+                                  p.proof_url,
+                                  p.id
+                                )
+                              }
+                              className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-lg transition shadow-2xs cursor-pointer"
+                              title="Approve this payment"
+                            >
+                              ✓ Approve
+                            </button>
+                            <button
+                              onClick={() =>
+                                handleRejectPayment(
+                                  { id: p.user_id, full_name: p.member_name, payment_id: p.id },
+                                  p.proof_url,
+                                  p.id
+                                )
+                              }
+                              className="px-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs rounded-lg border border-rose-200 transition cursor-pointer"
+                              title="Reject this payment proof"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ) : p.status === "Paid" ? (
                           <button
-                            onClick={() => setActiveInvoice(p)}
+                            onClick={() => {
+                              const memberPaidRecords = payments.filter(
+                                (item) =>
+                                  (item.user_id === p.user_id || (p.member_id && item.member_id === p.member_id)) &&
+                                  (item.status === "Paid" || item.raw_amount > 0)
+                              );
+                              const totalPaidSum = memberPaidRecords.reduce((sum, item) => sum + (Number(item.raw_amount) || 0), 0);
+                              const totalMembershipSum = memberPaidRecords
+                                .filter((item) => !item.is_addon)
+                                .reduce((sum, item) => sum + (Number(item.raw_amount) || 0), 0);
+                              const totalAddonSum = memberPaidRecords
+                                .filter((item) => item.is_addon)
+                                .reduce((sum, item) => sum + (Number(item.raw_amount) || 0), 0);
+
+                              setActiveInvoice({
+                                ...p,
+                                total_membership_paid: totalMembershipSum || p.raw_amount,
+                                total_addon_paid: totalAddonSum,
+                                total_paid_sum: totalPaidSum || p.raw_amount,
+                                member_history: memberPaidRecords.length > 0 ? memberPaidRecords : [p],
+                              });
+                            }}
                             className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-xs font-bold rounded-lg transition cursor-pointer"
                           >
                             Print Slip
                           </button>
+                        ) : p.status === "Rejected" ? (
+                          <span className="text-[10px] text-rose-600 font-bold bg-rose-50 border border-rose-200 px-2 py-0.5 rounded">
+                            ✕ Rejected
+                          </span>
                         ) : (
                           <span className="text-[10px] text-slate-400 font-semibold">No Slip</span>
                         )}
@@ -1113,18 +1381,52 @@ export default function PaymentsAdminPage() {
                                 ✓ Cleared
                               </span>
                               <button
-                                onClick={() =>
+                                onClick={() => {
+                                  const memberPaidRecords = payments.filter(
+                                    (p) =>
+                                      (p.user_id === m.id || p.member_id === m.member_id || p.member_name?.toLowerCase() === m.full_name?.toLowerCase()) &&
+                                      (p.status === "Paid" || p.raw_amount > 0)
+                                  );
+
+                                  const totalPaidSum = memberPaidRecords.reduce((sum, p) => sum + (Number(p.raw_amount) || 0), 0);
+                                  const totalMembershipSum = memberPaidRecords
+                                    .filter((p) => !p.is_addon)
+                                    .reduce((sum, p) => sum + (Number(p.raw_amount) || 0), 0);
+                                  const totalAddonSum = memberPaidRecords
+                                    .filter((p) => p.is_addon)
+                                    .reduce((sum, p) => sum + (Number(p.raw_amount) || 0), 0);
+
                                   setActiveInvoice({
-                                    id: info.payment_id || `pay-${m.id}`,
-                                    invoice_id: info.invoice_id || `INV-${m.member_id || "000"}`,
+                                    id: `stmt-${m.id}`,
+                                    invoice_id: info.invoice_id || (memberPaidRecords[0]?.invoice_id) || `INV-${m.member_id || "000"}`,
+                                    user_id: m.id,
                                     member_name: m.full_name,
+                                    member_id: m.member_id || "GP-MEMBER",
                                     plan: m.plan || "Standard Membership",
-                                    amount: `PKR ${Number(info.paid || info.total_fee).toLocaleString()}`,
+                                    amount: `PKR ${Number(totalPaidSum || info.paid || info.total_fee).toLocaleString()}`,
+                                    total_membership_paid: totalMembershipSum || Number(info.paid || info.total_fee),
+                                    total_addon_paid: totalAddonSum,
+                                    total_paid_sum: totalPaidSum || Number(info.paid || info.total_fee),
                                     date: new Date().toLocaleDateString("en-PK", { day: "2-digit", month: "short", year: "numeric" }),
-                                    method: info.method || "Cash / Desk",
+                                    method: info.method || (memberPaidRecords[0]?.method) || "Cash / Desk",
                                     status: "Paid",
-                                  })
-                                }
+                                    is_member_statement: true,
+                                    member_history: memberPaidRecords.length > 0 ? memberPaidRecords : [
+                                      {
+                                        id: info.payment_id || `pay-${m.id}`,
+                                        invoice_id: info.invoice_id || `INV-${m.member_id || "000"}`,
+                                        item_name: m.plan || "Standard Monthly Pass",
+                                        plan: m.plan || "Standard Monthly Pass",
+                                        date: new Date().toLocaleDateString("en-PK", { day: "2-digit", month: "short", year: "numeric" }),
+                                        method: info.method || "Cash / Desk",
+                                        amount: `PKR ${Number(info.paid || info.total_fee).toLocaleString()}`,
+                                        raw_amount: Number(info.paid || info.total_fee),
+                                        is_addon: false,
+                                        status: "Paid",
+                                      },
+                                    ],
+                                  });
+                                }}
                                 className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition cursor-pointer"
                                 title="Print Official Payment Slip"
                               >
@@ -1306,57 +1608,123 @@ export default function PaymentsAdminPage() {
         </div>
       )}
 
-      {/* INVOICE RECEIPT MODAL */}
+      {/* INVOICE RECEIPT & MEMBER STATEMENT MODAL */}
       {activeInvoice && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
-          <div className="bg-white border border-slate-200 rounded-3xl max-w-md w-full p-6 space-y-5 shadow-2xl text-slate-800 relative">
+          <div className="bg-white border border-slate-200 rounded-3xl max-w-lg w-full p-6 space-y-4 shadow-2xl text-slate-800 relative max-h-[90vh] overflow-y-auto">
             <button
               onClick={() => setActiveInvoice(null)}
-              className="absolute top-4 right-4 text-slate-400 hover:text-slate-700 font-bold text-sm p-1.5 rounded-lg"
+              className="absolute top-4 right-4 text-slate-400 hover:text-slate-700 font-bold text-sm p-1.5 rounded-lg cursor-pointer"
             >
               ✕
             </button>
 
-            <div className="border-b border-slate-100 pb-4 text-center space-y-1">
+            <div className="border-b border-slate-100 pb-3 text-center space-y-1">
               <div className="w-10 h-10 bg-emerald-600 text-white rounded-xl flex items-center justify-center font-black text-lg mx-auto shadow-xs mb-1">
                 AG
               </div>
               <h3 className="text-lg font-extrabold text-slate-900 tracking-tight">ABDULLAH GYM</h3>
-              <p className="text-xs font-bold text-emerald-700">Official Payment Receipt</p>
+              <p className="text-xs font-bold text-emerald-700">Official Member Payment Statement & Slip</p>
             </div>
 
             <div className="space-y-3 text-xs">
               <div className="flex justify-between items-center bg-slate-50 p-3 rounded-xl border border-slate-100 font-mono">
                 <div>
-                  <span className="text-[10px] text-slate-400 uppercase font-bold">Invoice</span>
+                  <span className="text-[10px] text-slate-400 uppercase font-bold">Statement / Inv</span>
                   <p className="font-bold text-slate-900">{activeInvoice.invoice_id}</p>
                 </div>
                 <div className="text-right">
-                  <span className="text-[10px] text-slate-400 uppercase font-bold">Date</span>
+                  <span className="text-[10px] text-slate-400 uppercase font-bold">Issued Date</span>
                   <p className="font-medium text-slate-700">{activeInvoice.date}</p>
                 </div>
               </div>
 
-              <div className="space-y-2 p-3.5 bg-slate-50/60 rounded-xl border border-slate-100">
+              <div className="space-y-1.5 p-3.5 bg-slate-50/70 rounded-xl border border-slate-100">
                 <div className="flex justify-between">
-                  <span className="text-slate-500">Member:</span>
+                  <span className="text-slate-500 font-medium">Member Name:</span>
                   <span className="font-bold text-slate-900">{activeInvoice.member_name}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-500">Plan:</span>
-                  <span className="font-semibold text-slate-800">{activeInvoice.plan}</span>
+                  <span className="text-slate-500 font-medium">Member ID:</span>
+                  <span className="font-mono font-bold text-emerald-800">{activeInvoice.member_id || "GP-MEMBER"}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-500">Method:</span>
-                  <span className="font-semibold text-slate-800">{activeInvoice.method}</span>
+                  <span className="text-slate-500 font-medium">Assigned Plan:</span>
+                  <span className="font-semibold text-slate-800">{activeInvoice.plan}</span>
                 </div>
               </div>
 
-              <div className="p-3.5 bg-slate-900 text-white rounded-xl">
-                <div className="flex justify-between items-center">
-                  <span className="text-slate-400 font-medium">Total Paid:</span>
-                  <span className="font-mono text-emerald-400 font-bold text-base">
-                    {activeInvoice.amount}
+              {/* All Monthly & Add-On Payments History */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-500">
+                    Payment History ({activeInvoice.member_history?.length || 1} Paid)
+                  </span>
+                  <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                    Verified Ledger
+                  </span>
+                </div>
+
+                <div className="max-h-52 overflow-y-auto rounded-xl border border-slate-200 divide-y divide-slate-100 bg-slate-50/40">
+                  {(activeInvoice.member_history && activeInvoice.member_history.length > 0
+                    ? activeInvoice.member_history
+                    : [activeInvoice]
+                  ).map((hist, idx) => (
+                    <div key={hist.id || idx} className="p-2.5 flex items-center justify-between hover:bg-white transition">
+                      <div className="space-y-0.5">
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${
+                              hist.is_addon
+                                ? "bg-purple-50 text-purple-700 border-purple-200"
+                                : hist.is_walk_in
+                                ? "bg-amber-50 text-amber-700 border-amber-200"
+                                : "bg-emerald-50 text-emerald-700 border-emerald-200"
+                            }`}
+                          >
+                            {hist.is_addon ? "Add-On" : hist.is_walk_in ? "Walk-In" : "Membership"}
+                          </span>
+                          <p className="font-bold text-slate-900 text-xs leading-tight">
+                            {hist.plan || hist.item_name || "Monthly Fee"}
+                          </p>
+                        </div>
+                        <p className="text-[10px] text-slate-500 font-mono">
+                          {hist.invoice_id} • {hist.date} • {hist.method || "Cash / Desk"}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <span className="font-mono font-black text-slate-900 text-xs block">
+                          {hist.amount || `PKR ${Number(hist.raw_amount || 0).toLocaleString()}`}
+                        </span>
+                        <span className="text-[9px] font-bold text-emerald-600">✓ Paid</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Financial Breakdown & Grand Total */}
+              <div className="p-3.5 bg-slate-900 text-white rounded-2xl space-y-1.5 shadow-inner">
+                {activeInvoice.total_addon_paid > 0 && (
+                  <div className="flex justify-between items-center text-xs text-slate-400">
+                    <span>Monthly Membership Total:</span>
+                    <span className="font-mono text-slate-300 font-bold">
+                      PKR {Number(activeInvoice.total_membership_paid || 0).toLocaleString()}
+                    </span>
+                  </div>
+                )}
+                {activeInvoice.total_addon_paid > 0 && (
+                  <div className="flex justify-between items-center text-xs text-slate-400">
+                    <span>Add-On Services Total:</span>
+                    <span className="font-mono text-purple-300 font-bold">
+                      PKR {Number(activeInvoice.total_addon_paid || 0).toLocaleString()}
+                    </span>
+                  </div>
+                )}
+                <div className="flex justify-between items-center pt-1 border-t border-slate-800">
+                  <span className="text-xs font-bold text-slate-200">Grand Total Paid:</span>
+                  <span className="font-mono text-emerald-400 font-black text-base">
+                    PKR {Number(activeInvoice.total_paid_sum || activeInvoice.raw_amount || 0).toLocaleString()}
                   </span>
                 </div>
               </div>
@@ -1385,9 +1753,9 @@ export default function PaymentsAdminPage() {
               {activeInvoice.status === "Paid" ? (
                 <button
                   onClick={() => window.print()}
-                  className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-4 py-2 rounded-xl transition-all shadow-xs cursor-pointer"
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition-all shadow-xs cursor-pointer flex items-center gap-1.5"
                 >
-                  Print Slip / Receipt
+                  <span>🖨️</span> Print Slip / Statement
                 </button>
               ) : (
                 <span className="text-[11px] font-bold text-rose-600 bg-rose-50 border border-rose-200 px-3 py-1.5 rounded-xl">
@@ -1399,66 +1767,109 @@ export default function PaymentsAdminPage() {
         </div>
       )}
 
-      {/* PROOF SCREENSHOT MODAL */}
+      {/* PROOF SCREENSHOT REVIEW MODAL */}
       {activeProof && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
-          <div className="bg-white border border-slate-200 rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl text-slate-800 relative">
+          <div className="bg-white border border-slate-200 rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl text-slate-800 relative max-h-[92vh] overflow-y-auto">
             <button
               onClick={() => setActiveProof(null)}
-              className="absolute top-4 right-4 text-slate-400 hover:text-slate-700 font-bold text-sm p-1.5 rounded-lg"
+              className="absolute top-4 right-4 text-slate-400 hover:text-slate-700 font-bold text-sm p-1.5 rounded-lg cursor-pointer"
             >
               ✕
             </button>
 
-            <div className="border-b border-slate-100 pb-2 flex justify-between items-start">
-              <div>
-                <h3 className="text-base font-extrabold text-slate-900">App Screenshot Review</h3>
-                <p className="text-xs text-slate-500">Submitted by {activeProof.member.full_name}</p>
-              </div>
-              <div className="text-right">
-                <span className="inline-block px-2.5 py-1 bg-indigo-50 border border-indigo-200 text-indigo-700 text-xs font-bold rounded-lg font-mono">
-                  PKR {Number(activeProof.info?.total_fee || activeProof.info?.paid || 0).toLocaleString()}
-                </span>
-                <p className="text-[10px] text-slate-500 font-semibold mt-0.5">
-                  {activeProof.info?.pending_item_name || activeProof.info?.plan || "Membership Fee"}
-                </p>
-              </div>
-            </div>
+            {(() => {
+              const memberObj = activeProof.member || activeProof || {};
+              const infoObj = activeProof.info || activeProof || {};
+              const proofUrl =
+                infoObj.proof_url ||
+                activeProof.proof_url ||
+                (typeof activeProof === "string" ? activeProof : null);
+              const feeAmount =
+                Number(infoObj.total_fee || infoObj.raw_total_fee || infoObj.raw_amount || infoObj.paid || 0);
+              const planTitle =
+                infoObj.pending_item_name || infoObj.plan || infoObj.item_name || "Payment Verification";
+              const targetPaymentId = infoObj.payment_id || infoObj.id || memberObj.payment_id;
 
-            <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-2 max-h-72 overflow-hidden flex items-center justify-center">
-              <img
-                src={
-                  activeProof.info.proof_url ||
-                  "https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?auto=format&fit=crop&w=600&q=80"
-                }
-                alt="Payment Proof"
-                className="max-h-64 w-full object-contain rounded-xl"
-              />
-            </div>
+              return (
+                <>
+                  <div className="border-b border-slate-100 pb-2 flex justify-between items-start">
+                    <div>
+                      <h3 className="text-base font-extrabold text-slate-900">Payment Screenshot</h3>
+                      <p className="text-xs text-slate-500">
+                        From: <strong className="text-slate-800 font-bold">{memberObj.full_name || memberObj.member_name || "Gym Member"}</strong>
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <span className="inline-block px-2.5 py-1 bg-indigo-50 border border-indigo-200 text-indigo-700 text-xs font-bold rounded-lg font-mono">
+                        PKR {feeAmount.toLocaleString()}
+                      </span>
+                      <p className="text-[10px] text-slate-500 font-semibold mt-0.5">
+                        {planTitle}
+                      </p>
+                    </div>
+                  </div>
 
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
-              <button
-                type="button"
-                onClick={() => setActiveProof(null)}
-                className="text-xs text-slate-500 hover:text-slate-800 px-3 py-2 rounded-xl font-semibold mr-auto"
-              >
-                Close
-              </button>
-              <button
-                type="button"
-                onClick={() => handleRejectPayment(activeProof.member, activeProof.info?.proof_url, activeProof.info?.payment_id)}
-                className="bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs px-3.5 py-2 rounded-xl border border-rose-200 transition-all cursor-pointer"
-              >
-                Reject Proof
-              </button>
-              <button
-                type="button"
-                onClick={() => handleApprovePayment(activeProof.member, activeProof.info?.proof_url, activeProof.info?.payment_id)}
-                className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-4 py-2 rounded-xl transition-all shadow-xs cursor-pointer"
-              >
-                Approve {activeProof.info?.is_pending_addon ? "Add-on" : "Transfer"} (PKR {Number(activeProof.info?.total_fee || 0).toLocaleString()})
-              </button>
-            </div>
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-2 max-h-96 overflow-auto flex items-center justify-center">
+                    {proofUrl ? (
+                      <a href={proofUrl} target="_blank" rel="noopener noreferrer" title="Click to view full size">
+                        <img
+                          src={proofUrl}
+                          alt="Payment Screenshot"
+                          className="max-h-88 w-full object-contain rounded-xl"
+                          onError={(e) => {
+                            console.warn("Screenshot failed to load:", proofUrl);
+                          }}
+                        />
+                      </a>
+                    ) : (
+                      <div className="py-12 text-center text-slate-400 text-xs">
+                        <span className="text-3xl block mb-1">🖼️</span>
+                        No proof screenshot attached.
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                    <button
+                      type="button"
+                      onClick={() => setActiveProof(null)}
+                      className="text-xs text-slate-500 hover:text-slate-800 px-3 py-2 rounded-xl font-semibold mr-auto cursor-pointer"
+                    >
+                      Close
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleRejectPayment(memberObj, proofUrl, targetPaymentId)}
+                      className="bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs px-3.5 py-2 rounded-xl border border-rose-200 transition-all cursor-pointer"
+                    >
+                      Reject Proof
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleApprovePayment(
+                          {
+                            id: memberObj.id || memberObj.user_id,
+                            full_name: memberObj.full_name || memberObj.member_name,
+                            payment_id: targetPaymentId,
+                            is_addon: infoObj.is_addon || infoObj.is_pending_addon,
+                            addon_id: infoObj.addon_id,
+                            addon_name: infoObj.addon_name,
+                            plan: infoObj.plan,
+                          },
+                          proofUrl,
+                          targetPaymentId
+                        )
+                      }
+                      className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-4 py-2 rounded-xl transition-all shadow-xs cursor-pointer"
+                    >
+                      ✓ Approve (PKR {feeAmount.toLocaleString()})
+                    </button>
+                  </div>
+                </>
+              );
+            })()}
           </div>
         </div>
       )}

@@ -134,7 +134,15 @@ export default function AttendanceAdminPage() {
 
         const { data: payData } = await supabase
           .from("payments")
-          .select("user_id, status, amount");
+          .select("*");
+
+        let addonPayData = [];
+        try {
+          const { data: aData } = await supabase
+            .from("addon_payments")
+            .select("*");
+          if (aData) addonPayData = aData;
+        } catch (e) {}
 
         const profileMap = new Map();
         if (!profErr && profData) {
@@ -143,7 +151,16 @@ export default function AttendanceAdminPage() {
           );
 
           const evaluated = registeredOnly.map((p) => {
-            const userPays = payData ? payData.filter((pay) => pay.user_id === p.id && (pay.status === "Paid" || pay.status === "Partial")) : [];
+            if (p.role === "admin") {
+              if (p.status === "Suspended" || p.status === "Expired") {
+                p.status = "Active";
+                supabase.from("profiles").update({ status: "Active" }).eq("id", p.id);
+              }
+              return p;
+            }
+
+            const allPays = [...(payData || []), ...(addonPayData || [])];
+            const userPays = allPays.filter((pay) => pay.user_id === p.id && (pay.status === "Paid" || pay.status === "Partial"));
             const createdAt = p.created_at ? new Date(p.created_at) : null;
             const now = new Date();
             const daysDiff = createdAt ? (now.getTime() - createdAt.getTime()) / (1000 * 60 * 60 * 24) : 0;
