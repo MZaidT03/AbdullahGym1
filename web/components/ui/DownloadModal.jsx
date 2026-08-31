@@ -23,25 +23,53 @@ export function DownloadModal({ isOpen, onClose }) {
 
         {/* Status Badge */}
         <span className="px-3.5 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-xs font-extrabold uppercase tracking-widest mb-3">
-          Coming Soon
+          Download Now
         </span>
 
         {/* Title */}
         <h3 className="text-2xl font-black text-white uppercase tracking-tight mb-3">
-          App In Active Development
+          Get The App
         </h3>
 
         {/* Description */}
         <p className="text-xs sm:text-sm text-gray-300 leading-relaxed mb-6 font-normal">
-          The official <strong className="text-emerald-400 font-bold">ABDULLAH GYM 1</strong> mobile app for iOS & Android is coming soon! You will be able to manage digital memberships, track attendance, and view real-time gym crowd status.
+          Download the official{" "}
+          <strong className="text-emerald-400 font-bold">ABDULLAH GYM 1</strong>{" "}
+          mobile app for iOS & Android, or access our web app. Manage
+          memberships, track attendance, and view real-time gym status.
         </p>
 
-        {/* Action Button */}
+        {/* Download Buttons */}
+        <div className="w-full flex flex-col gap-3 mb-4">
+          {/* Mobile App Button */}
+          <a
+            href="https://expo.dev/accounts/zaidtahir/projects/abdullah-gym-1/builds/915287a9-2226-4280-bb9d-86f58da41fda"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="w-full bg-[#22C55E] hover:bg-[#16A34A] text-white font-black text-sm uppercase tracking-wider py-3 rounded-xl transition-all shadow-lg shadow-emerald-500/30 border border-emerald-400/30 active:scale-95 cursor-pointer flex items-center justify-center gap-2"
+          >
+            <span>📱</span>
+            Download Mobile App
+          </a>
+
+          {/* Web App Button for iOS */}
+          <a
+            href="https://abdullahgym1-member.netlify.app/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-black text-sm uppercase tracking-wider py-3 rounded-xl transition-all shadow-lg shadow-blue-500/30 border border-blue-400/30 active:scale-95 cursor-pointer flex items-center justify-center gap-2"
+          >
+            <span>🌐</span>
+            Access Web App (iOS)
+          </a>
+        </div>
+
+        {/* Close Button */}
         <button
           onClick={onClose}
-          className="w-full bg-[#22C55E] hover:bg-[#16A34A] text-white font-black text-sm uppercase tracking-wider py-3.5 rounded-xl transition-all shadow-lg shadow-emerald-500/30 border border-emerald-400/30 active:scale-95 cursor-pointer"
+          className="w-full text-gray-300 hover:text-white font-semibold text-sm py-2 rounded-xl transition-colors cursor-pointer"
         >
-          Got It
+          Close
         </button>
       </div>
     </div>
