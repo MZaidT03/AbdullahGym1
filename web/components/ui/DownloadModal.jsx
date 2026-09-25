@@ -43,7 +43,7 @@ export function DownloadModal({ isOpen, onClose }) {
         <div className="w-full flex flex-col gap-3 mb-4">
           {/* Mobile App Button */}
           <a
-            href="https://expo.dev/accounts/zaidtahir/projects/abdullah-gym-1/builds/6bcf33f6-d950-452b-bc10-ab195a232410"
+            href="https://github.com/MZaidT03/AbdullahGym1/releases/download/v1.0.0/Abdullah-Gym-v1.0.0.apk?utm_source=chatgpt.com"
             target="_blank"
             rel="noopener noreferrer"
             className="w-full bg-[#22C55E] hover:bg-[#16A34A] text-white font-black text-sm uppercase tracking-wider py-3 rounded-xl transition-all shadow-lg shadow-emerald-500/30 border border-emerald-400/30 active:scale-95 cursor-pointer flex items-center justify-center gap-2"
